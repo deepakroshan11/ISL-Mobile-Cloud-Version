@@ -1,17 +1,14 @@
-# isl_ui_dashboard.py
+# isl_ui_dashboard.py - FIXED VERSION WITH SPEAK BUTTON SUPPORT
 # Modern web-based UI for ISL translator
 # Uses Flask + Socket.IO for real-time updates without blocking processing
-# OPTIMIZED: Receives pre-processed data from core engine
 
-from flask import Flask, render_template, Response
+from flask import Flask, render_template
 from flask_socketio import SocketIO, emit
-from multiprocessing import Queue
 import cv2
 import numpy as np
-import json
-import time
 import base64
 from threading import Thread, Lock
+import time
 
 # Import shared state from core processor
 import sys
@@ -95,34 +92,47 @@ def handle_connect():
 
 @socketio.on('command', namespace='/isl')
 def handle_command(data):
-    """Handle commands from UI"""
+    """Handle commands from UI - FIXED VERSION"""
     global shared_state
     
     action = data.get('action')
-    print(f'🎮 Command: {action}')
+    print(f'🎮 Command received: {action}')
     
     try:
         if action == 'reset':
             shared_state.command_queue.put({'action': 'reset'})
             emit('feedback', {'status': 'success', 'message': 'Reset done'})
+            print('✅ Reset command sent to core')
         
         elif action == 'backspace':
             shared_state.command_queue.put({'action': 'backspace'})
             emit('feedback', {'status': 'success', 'message': 'Backspace'})
+            print('✅ Backspace command sent to core')
         
         elif action == 'accept_suggestion':
             word = data.get('word', '')
             shared_state.command_queue.put({'action': 'accept_suggestion', 'word': word})
             emit('feedback', {'status': 'success', 'message': f'Accepted: {word}'})
+            print(f'✅ Suggestion accepted: {word}')
         
-        elif action == 'export':
-            # Handle export (save to file)
-            emit('feedback', {'status': 'success', 'message': 'Export not yet implemented'})
+        elif action == 'speak':
+            # FIXED: Handle speak command properly
+            text = data.get('text', '')
+            if text:
+                shared_state.command_queue.put({'action': 'speak', 'text': text})
+                emit('feedback', {'status': 'success', 'message': f'Speaking: {text}'})
+                print(f'🔊 Speak command sent: {text}')
+            else:
+                emit('feedback', {'status': 'error', 'message': 'No text to speak'})
+                print('⚠️ Speak command received but no text provided')
         
         else:
-            emit('feedback', {'status': 'error', 'message': 'Unknown command'})
+            emit('feedback', {'status': 'error', 'message': f'Unknown command: {action}'})
+            print(f'❌ Unknown command: {action}')
+            
     except Exception as e:
         emit('feedback', {'status': 'error', 'message': str(e)})
+        print(f'❌ Error handling command: {e}')
 
 # -------------------------------
 # ---------- MAIN ---------------
@@ -142,6 +152,7 @@ def start_ui_server(shared_state_obj):
     print("="*60)
     print("📊 Dashboard URL: http://localhost:5000")
     print("🔥 Real-time updates via WebSocket")
+    print("🔊 Speak button functionality: ENABLED")
     print("="*60 + "\n")
     
     # Run Flask app
@@ -149,7 +160,7 @@ def start_ui_server(shared_state_obj):
 
 if __name__ == "__main__":
     # This should be run after starting the core processor
-    print("⚠️  Make sure isl_core_processor.py is running first!")
+    print("⚠️  Make sure isl_detection.py is running first!")
     print("Loading shared state...")
     
     shared_state = SharedState()

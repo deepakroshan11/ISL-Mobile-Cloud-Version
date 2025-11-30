@@ -1,7 +1,6 @@
-# isl_detection.py - ENHANCED VERSION
-# NEW FEATURE: Letter + Confidence overlay on video feed
-# Displays detected letter with accuracy in top-left corner
-# No changes to emotion detection, dashboard, or graph functionality
+# isl_detection.py - NATURAL EMOTION DETECTION
+# OPTIMIZED FOR: Everyday subtle expressions
+# Enhanced sensitivity for happy, sad, angry, surprise detection
 
 import cv2
 import mediapipe as mp
@@ -29,10 +28,12 @@ import pygame
 ISL_MODEL_PATH = "model.h5"
 CAM_INDEX = 0
 
-BASE_FER_WEIGHT = 0.65
-BASE_LANDMARK_WEIGHT = 0.35
-SMOOTHING_FRAMES = 15
-MIN_CONF_TO_SHOW = 0.25
+# NATURAL EMOTION SENSITIVITY: More balanced fusion for everyday expressions
+BASE_FER_WEIGHT = 0.45
+BASE_LANDMARK_WEIGHT = 0.55
+SMOOTHING_FRAMES = 4  # Faster response to emotion changes
+MIN_CONF_TO_SHOW = 0.08  # Much more sensitive to subtle emotions
+
 EMOTIONS = ["happy", "sad", "angry", "surprise", "neutral"]
 
 BUFFER_SIZE = 12
@@ -41,17 +42,15 @@ STABILITY_THRESHOLD = 0.7
 SENTENCE_DELAY = 2.0
 SPACE_THRESHOLD = 15
 
-# TTS Settings
 ENABLE_AUTO_TTS = True
 TTS_LANGUAGE = "en"
 
-# NEW: Display Settings for Letter Overlay
-SHOW_LETTER_OVERLAY = True  # Enable/disable letter display on video
-OVERLAY_COLOR_LETTER = (0, 255, 255)  # Yellow for letter (BGR)
-OVERLAY_COLOR_CONF = (255, 255, 0)    # Cyan for confidence (BGR)
-OVERLAY_POSITION = (20, 50)           # Top-left position
-OVERLAY_FONT_SCALE = 1.5              # Font size
-OVERLAY_THICKNESS = 3                 # Text thickness
+SHOW_LETTER_OVERLAY = True
+OVERLAY_COLOR_LETTER = (0, 255, 255)
+OVERLAY_COLOR_CONF = (255, 255, 0)
+OVERLAY_POSITION = (20, 50)
+OVERLAY_FONT_SCALE = 1.5
+OVERLAY_THICKNESS = 3
 
 COMMON_WORDS = [
     "HELLO", "HELP", "PLEASE", "THANK", "YOU", "YES", "NO", "GOOD", "BAD",
@@ -64,7 +63,6 @@ COMMON_WORDS = [
 # -------------------------------
 
 class SharedState:
-    """Shared memory structure for inter-process communication"""
     def __init__(self):
         self.frame_width = Value(ctypes.c_int, 640)
         self.frame_height = Value(ctypes.c_int, 480)
@@ -88,7 +86,6 @@ speaking_word = ""
 pause_audio = False
 
 def speak_text(text, lang=TTS_LANGUAGE):
-    """Non-blocking TTS using gTTS + pygame"""
     global speaking_word
     if not text or not text.strip():
         return
@@ -125,8 +122,6 @@ def speak_text(text, lang=TTS_LANGUAGE):
                 except PermissionError:
                     if attempt < max_retries - 1:
                         time.sleep(0.2)
-                    else:
-                        print(f"⚠️  Could not delete {filename}")
         except Exception as e:
             print(f"TTS error: {e}")
             speaking_word = ""
@@ -153,11 +148,10 @@ def pre_process_landmark(landmark_list):
     return [n / max_value for n in temp]
 
 def apply_clahe(frame):
-    """CLAHE for better lighting normalization"""
     try:
         lab = cv2.cvtColor(frame, cv2.COLOR_BGR2LAB)
         l, a, b = cv2.split(lab)
-        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
+        clahe = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(8,8))
         l2 = clahe.apply(l)
         lab = cv2.merge((l2, a, b))
         return cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)
@@ -169,87 +163,473 @@ def compute_brightness(frame):
     return float(np.mean(yuv[:,:,0]))
 
 def extract_face_features(face_landmarks, img_shape):
+    """Extract 28 facial features for natural emotion detection"""
     try:
         pts = np.array(face_landmarks, dtype=np.float32)
         h, w = img_shape[:2]
         face_width = max(np.max(pts[:,0]) - np.min(pts[:,0]), 1.0)
+        face_height = max(np.max(pts[:,1]) - np.min(pts[:,1]), 1.0)
 
-        left_corner = pts[78]; right_corner = pts[308]
-        top_lip = pts[13]; bottom_lip = pts[14]
-        mouth_left = left_corner; mouth_right = right_corner
+        # === MOUTH REGION ===
+        left_corner = pts[61]
+        right_corner = pts[291]
+        top_lip_center = pts[13]
+        bottom_lip_center = pts[14]
+        upper_lip_top = pts[0]
+        lower_lip_bottom = pts[17]
+        upper_lip_left = pts[78]
+        upper_lip_right = pts[308]
+        lower_lip_left = pts[88]
+        lower_lip_right = pts[318]
+        
+        mouth_width = np.linalg.norm(right_corner - left_corner)
+        mouth_height = np.linalg.norm(bottom_lip_center - top_lip_center)
+        mouth_aspect_ratio = mouth_width / (mouth_height + 1e-6)
+        mouth_openness = mouth_height / face_height
+        
+        # Mouth curvature (CRITICAL for happy/sad)
+        mouth_center_y = (top_lip_center[1] + bottom_lip_center[1]) / 2.0
+        left_corner_curve = (left_corner[1] - mouth_center_y) / face_height
+        right_corner_curve = (right_corner[1] - mouth_center_y) / face_height
+        avg_mouth_curve = (left_corner_curve + right_corner_curve) / 2.0
+        
+        upper_lip_thickness = np.linalg.norm(upper_lip_top - upper_lip_left) / face_width
+        lower_lip_thickness = np.linalg.norm(lower_lip_bottom - lower_lip_left) / face_width
+        lip_compression = upper_lip_thickness + lower_lip_thickness
+        lip_gap = np.linalg.norm(upper_lip_top - lower_lip_bottom) / face_height
+        mouth_width_ratio = mouth_width / face_width
+        lower_lip_center_droop = (lower_lip_bottom[1] - bottom_lip_center[1]) / face_height
+        mouth_asymmetry = abs(left_corner_curve - right_corner_curve)
 
-        mouth_w = np.linalg.norm(mouth_right - mouth_left)
-        mouth_h = np.linalg.norm(bottom_lip - top_lip)
-        mouth_ratio = mouth_w / (mouth_h + 1e-6)
-        mouth_open = mouth_h / face_width
+        # === EYE REGION ===
+        left_eye_top = pts[159]
+        left_eye_bottom = pts[145]
+        left_eye_left = pts[33]
+        left_eye_right = pts[133]
+        left_eye_inner = pts[133]
+        
+        right_eye_top = pts[386]
+        right_eye_bottom = pts[374]
+        right_eye_left = pts[362]
+        right_eye_right = pts[263]
+        right_eye_inner = pts[362]
+        
+        left_eye_height = np.linalg.norm(left_eye_top - left_eye_bottom)
+        right_eye_height = np.linalg.norm(right_eye_top - right_eye_bottom)
+        avg_eye_openness = ((left_eye_height + right_eye_height) / 2.0) / face_height
+        
+        left_eye_width = np.linalg.norm(left_eye_right - left_eye_left)
+        right_eye_width = np.linalg.norm(right_eye_right - right_eye_left)
+        avg_eye_width = ((left_eye_width + right_eye_width) / 2.0) / face_width
+        
+        left_ear = left_eye_height / (left_eye_width + 1e-6)
+        right_ear = right_eye_height / (right_eye_width + 1e-6)
+        eye_aspect_ratio = (left_ear + right_ear) / 2.0
+        
+        left_upper_lid_droop = (left_eye_top[1] - left_eye_inner[1]) / face_height
+        right_upper_lid_droop = (right_eye_top[1] - right_eye_inner[1]) / face_height
+        avg_upper_lid_droop = (left_upper_lid_droop + right_upper_lid_droop) / 2.0
+        
+        eye_tension = 1.0 - eye_aspect_ratio
 
-        left_eye_open = np.linalg.norm(pts[159] - pts[145]) / face_width
-        right_eye_open = np.linalg.norm(pts[386] - pts[374]) / face_width
-        eye_open = (left_eye_open + right_eye_open) / 2.0
+        # === EYEBROW REGION ===
+        left_inner_brow = pts[70]
+        right_inner_brow = pts[300]
+        left_outer_brow = pts[105]
+        right_outer_brow = pts[334]
+        left_mid_brow = pts[107]
+        right_mid_brow = pts[336]
+        
+        left_brow_height = (left_inner_brow[1] - left_eye_top[1]) / face_height
+        right_brow_height = (right_inner_brow[1] - right_eye_top[1]) / face_height
+        avg_brow_height = (left_brow_height + right_brow_height) / 2.0
+        
+        left_brow_slant = (left_outer_brow[1] - left_inner_brow[1]) / face_width
+        right_brow_slant = (right_outer_brow[1] - right_inner_brow[1]) / face_width
+        avg_brow_slant = (left_brow_slant + right_brow_slant) / 2.0
+        
+        brow_distance = np.linalg.norm(right_inner_brow - left_inner_brow) / face_width
+        
+        left_brow_arch = (left_mid_brow[1] - left_inner_brow[1]) / face_height
+        right_brow_arch = (right_mid_brow[1] - right_inner_brow[1]) / face_height
+        avg_brow_arch = (left_brow_arch + right_brow_arch) / 2.0
+        
+        left_inner_raise = (left_eye_top[1] - left_inner_brow[1]) / face_height
+        right_inner_raise = (right_eye_top[1] - right_inner_brow[1]) / face_height
+        inner_brow_raise = (left_inner_raise + right_inner_raise) / 2.0
+        
+        left_outer_lower = (left_outer_brow[1] - left_eye_top[1]) / face_height
+        right_outer_lower = (right_outer_brow[1] - right_eye_top[1]) / face_height
+        outer_brow_lower = (left_outer_lower + right_outer_lower) / 2.0
+        
+        brow_tension = 1.0 / (brow_distance + 0.01)
 
-        left_brow_gap = np.linalg.norm(pts[70] - pts[159]) / face_width
-        right_brow_gap = np.linalg.norm(pts[300] - pts[386]) / face_width
-        brow_gap = (left_brow_gap + right_brow_gap) / 2.0
+        # === JAW/CHIN REGION ===
+        chin = pts[152]
+        left_jaw = pts[172]
+        right_jaw = pts[397]
+        left_jaw_angle = pts[234]
+        right_jaw_angle = pts[454]
+        
+        jaw_drop = np.linalg.norm(chin - top_lip_center) / face_height
+        jaw_width = np.linalg.norm(right_jaw - left_jaw) / face_width
+        
+        left_jaw_clench = np.linalg.norm(left_jaw_angle - left_corner) / face_width
+        right_jaw_clench = np.linalg.norm(right_jaw_angle - right_corner) / face_width
+        jaw_clench = (left_jaw_clench + right_jaw_clench) / 2.0
+        
+        chin_protrusion = (chin[1] - bottom_lip_center[1]) / face_height
 
-        lip_center_y = (top_lip[1] + bottom_lip[1]) / 2.0
-        corner_upness = ((mouth_left[1] - lip_center_y) + (mouth_right[1] - lip_center_y)) / 2.0
-        mouth_corner_dir = -corner_upness / face_width
+        # === CHEEK REGION ===
+        left_cheek = pts[50]
+        right_cheek = pts[280]
+        nose_bottom = pts[2]
+        
+        left_cheek_height = (nose_bottom[1] - left_cheek[1]) / face_height
+        right_cheek_height = (nose_bottom[1] - right_cheek[1]) / face_height
+        avg_cheek_raise = (left_cheek_height + right_cheek_height) / 2.0
+        
+        left_cheek_width = np.linalg.norm(left_cheek - left_corner) / face_width
+        right_cheek_width = np.linalg.norm(right_cheek - right_corner) / face_width
+        cheek_puff = (left_cheek_width + right_cheek_width) / 2.0
 
-        chin = pts[152] if pts.shape[0] > 152 else np.array([np.mean(pts[:,0]), np.max(pts[:,1])])
-        jaw_tension = np.linalg.norm(top_lip - chin) / face_width
+        # === NOSE REGION ===
+        nose_tip = pts[1]
+        nose_bridge = pts[6]
+        left_nostril = pts[98]
+        right_nostril = pts[327]
+        
+        nose_wrinkle = np.linalg.norm(nose_tip - nose_bridge) / face_height
+        nostril_width = np.linalg.norm(right_nostril - left_nostril) / face_width
 
         return {
-            "mouth_ratio": float(mouth_ratio),
-            "mouth_open": float(mouth_open),
-            "eye_open": float(eye_open),
-            "brow_gap": float(brow_gap),
-            "mouth_corner_dir": float(mouth_corner_dir),
-            "jaw_tension": float(jaw_tension),
+            # Mouth (8 features)
+            "mouth_aspect_ratio": float(mouth_aspect_ratio),
+            "mouth_openness": float(mouth_openness),
+            "mouth_curve": float(avg_mouth_curve),
+            "lip_gap": float(lip_gap),
+            "mouth_width_ratio": float(mouth_width_ratio),
+            "lip_compression": float(lip_compression),
+            "lower_lip_droop": float(lower_lip_center_droop),
+            "mouth_asymmetry": float(mouth_asymmetry),
+            
+            # Eyes (5 features)
+            "eye_openness": float(avg_eye_openness),
+            "eye_width": float(avg_eye_width),
+            "eye_aspect_ratio": float(eye_aspect_ratio),
+            "upper_lid_droop": float(avg_upper_lid_droop),
+            "eye_tension": float(eye_tension),
+            
+            # Eyebrows (7 features)
+            "brow_height": float(avg_brow_height),
+            "brow_slant": float(avg_brow_slant),
+            "brow_distance": float(brow_distance),
+            "brow_arch": float(avg_brow_arch),
+            "inner_brow_raise": float(inner_brow_raise),
+            "outer_brow_lower": float(outer_brow_lower),
+            "brow_tension": float(brow_tension),
+            
+            # Jaw/Chin (4 features)
+            "jaw_drop": float(jaw_drop),
+            "jaw_width": float(jaw_width),
+            "jaw_clench": float(jaw_clench),
+            "chin_protrusion": float(chin_protrusion),
+            
+            # Cheeks (2 features)
+            "cheek_raise": float(avg_cheek_raise),
+            "cheek_puff": float(cheek_puff),
+            
+            # Nose (2 features)
+            "nose_wrinkle": float(nose_wrinkle),
+            "nostril_flare": float(nostril_width)
         }
-    except Exception:
+    except Exception as e:
         return {}
 
 def landmark_scores_from_features(feat):
+    """Natural emotion detection from facial features"""
     if not feat:
         return {e: 0.0 for e in EMOTIONS[:-1]} | {"neutral": 1.0}
 
-    mouth_ratio = feat.get("mouth_ratio", 1.0)
-    mouth_open = feat.get("mouth_open", 0.0)
-    corner = feat.get("mouth_corner_dir", 0.0)
+    # Extract all features
+    mouth_ratio = feat.get("mouth_aspect_ratio", 1.5)
+    mouth_open = feat.get("mouth_openness", 0.0)
+    mouth_curve = feat.get("mouth_curve", 0.0)
+    lip_gap = feat.get("lip_gap", 0.03)
+    mouth_width = feat.get("mouth_width_ratio", 0.4)
+    lip_compression = feat.get("lip_compression", 0.1)
+    lower_lip_droop = feat.get("lower_lip_droop", 0.0)
+    mouth_asymmetry = feat.get("mouth_asymmetry", 0.0)
     
+    eye_open = feat.get("eye_openness", 0.06)
+    eye_width = feat.get("eye_width", 0.15)
+    eye_ar = feat.get("eye_aspect_ratio", 0.3)
+    upper_lid_droop = feat.get("upper_lid_droop", 0.0)
+    eye_tension = feat.get("eye_tension", 0.0)
+    
+    brow_height = feat.get("brow_height", -0.08)
+    brow_slant = feat.get("brow_slant", 0.0)
+    brow_dist = feat.get("brow_distance", 0.15)
+    brow_arch = feat.get("brow_arch", 0.0)
+    inner_brow_raise = feat.get("inner_brow_raise", 0.0)
+    outer_brow_lower = feat.get("outer_brow_lower", 0.0)
+    brow_tension = feat.get("brow_tension", 0.0)
+    
+    jaw_drop = feat.get("jaw_drop", 0.2)
+    jaw_width = feat.get("jaw_width", 0.35)
+    jaw_clench = feat.get("jaw_clench", 0.15)
+    chin_protrusion = feat.get("chin_protrusion", 0.0)
+    
+    cheek_raise = feat.get("cheek_raise", 0.0)
+    cheek_puff = feat.get("cheek_puff", 0.0)
+    
+    nose_wrinkle = feat.get("nose_wrinkle", 0.0)
+    nostril_flare = feat.get("nostril_flare", 0.0)
+
+    # Initialize scores
     happy = 0.0
-    if corner > 0.01:
-        happy = min(1.0, (corner / 0.08) + max(0.0, (mouth_ratio - 1.2)/0.8))
-    happy = max(0.0, min(1.0, happy))
-
     sad = 0.0
-    if corner < -0.005 or mouth_ratio < 1.05:
-        sad = min(1.0, (abs(min(0.0, corner)) / 0.06) + max(0.0, (1.05 - mouth_ratio)/0.4))
-    sad = max(0.0, min(1.0, sad))
-
-    brow_gap = feat.get("brow_gap", 0.08)
-    eye_open = feat.get("eye_open", 0.08)
-    jaw_t = feat.get("jaw_tension", 0.02)
     angry = 0.0
-    if brow_gap < 0.06:
-        angry += (0.06 - brow_gap) / 0.06 * 0.6
-    if eye_open < 0.06:
-        angry += (0.06 - eye_open) / 0.06 * 0.3
-    if jaw_t > 0.035:
-        angry += min(0.3, (jaw_t - 0.035) / 0.05)
-    angry = max(0.0, min(1.0, angry))
-
     surprise = 0.0
-    if brow_gap > 0.12:
-        surprise += min(1.0, (brow_gap - 0.12)/0.08) * 0.6
-    if feat.get("eye_open",0) > 0.12:
-        surprise += min(1.0, (feat.get("eye_open") - 0.12)/0.15) * 0.4
-    if feat.get("mouth_open",0) > 0.04:
-        surprise += min(0.4, (feat.get("mouth_open") - 0.04) / 0.1)
-    surprise = max(0.0, min(1.0, surprise))
 
-    other_max = max(happy, sad, angry, surprise)
-    neutral = max(0.0, 1.0 - other_max)
+    # ========================================
+    # HAPPY DETECTION - Natural everyday smiles
+    # ========================================
+    # Even slight smile activation
+    if mouth_curve < -0.002:  # Much more sensitive to upward curve
+        happy += min(0.40, abs(mouth_curve) / 0.025)
+    
+    # Natural smile width
+    if mouth_ratio > 1.35:  # Lower threshold
+        happy += min(0.25, (mouth_ratio - 1.35) / 0.45)
+    
+    # Cheek activation
+    if cheek_raise > 0.008:  # More sensitive
+        happy += min(0.22, cheek_raise / 0.022)
+    
+    # Cheek puffing
+    if cheek_puff > 0.15:  # Lower threshold
+        happy += 0.18
+    
+    # Natural eye squint from smile
+    if eye_ar < 0.28 and eye_tension > 0.5:  # More relaxed
+        happy += 0.18
+    
+    # SOFTER EXCLUSIONS - allow more natural happy
+    if mouth_curve > 0.003:  # Only exclude strong downturns
+        happy *= 0.3
+    if brow_height < -0.095:  # Only exclude very angry brows
+        happy *= 0.4
+    if inner_brow_raise > 0.08:  # Only exclude strong sad brows
+        happy *= 0.4
+    if mouth_open > 0.07:  # Allow wider smiles
+        happy *= 0.6
+    
+    happy = max(0.0, min(1.0, happy * 1.2))
+
+    # ========================================
+    # SAD DETECTION - Natural sadness/concern
+    # ========================================
+    sad_score = 0.0
+    
+    # Inner eyebrows pattern - more sensitive
+    inner_brow_pull = inner_brow_raise * (1.0 / (brow_dist + 0.01))
+    if inner_brow_raise > 0.055 and brow_dist < 0.165:  # More relaxed
+        sad_score += min(0.45, inner_brow_pull * 6.0)
+    elif inner_brow_raise > 0.055:
+        sad_score += min(0.30, inner_brow_raise / 0.028)
+    
+    # Mouth corners down
+    if mouth_curve > 0.001:  # Much more sensitive
+        sad_score += min(0.35, mouth_curve / 0.025)
+    
+    # Lip compression
+    if lip_compression < 0.095 and lip_gap < 0.035:  # More relaxed
+        sad_score += 0.20
+    
+    # Narrow mouth
+    if mouth_width < 0.395:  # More relaxed
+        sad_score += min(0.16, (0.395 - mouth_width) / 0.05)
+    
+    # Eyebrow slant
+    if outer_brow_lower > -0.085:  # More sensitive
+        sad_score += min(0.16, abs(outer_brow_lower + 0.085) / 0.025)
+    
+    # Overall brow position
+    if brow_height > -0.078:  # More relaxed
+        sad_score += min(0.18, (brow_height + 0.078) / 0.04)
+    
+    # Natural eye state
+    if 0.05 < eye_open < 0.08 and eye_tension < 0.62:  # More relaxed
+        sad_score += 0.16
+    
+    # Droopy eyelids
+    if upper_lid_droop < -0.015:  # More sensitive
+        sad_score += min(0.14, abs(upper_lid_droop) / 0.03)
+    
+    # Jaw position
+    if jaw_drop < 0.22:  # More relaxed
+        sad_score += 0.10
+    
+    # SOFTER EXCLUSIONS
+    if mouth_curve < -0.003:  # Only exclude clear smiles
+        sad_score *= 0.2
+    if cheek_raise > 0.015:  # Only exclude strong cheek raise
+        sad_score *= 0.3
+    if brow_height < -0.092:  # Only exclude very lowered brows
+        sad_score *= 0.35
+    if eye_open > 0.095:  # Only exclude very wide eyes
+        sad_score *= 0.4
+    if brow_dist < 0.125:  # Only exclude very furrowed
+        sad_score *= 0.35
+    if mouth_open > 0.055:  # Only exclude wide open
+        sad_score *= 0.45
+    
+    sad = max(0.0, min(1.0, sad_score * 1.5))
+
+    # ========================================
+    # ANGRY DETECTION - Natural frustration/annoyance
+    # ========================================
+    angry_score = 0.0
+    
+    # Eyebrows furrowed
+    if brow_dist < 0.145:  # More sensitive
+        angry_score += min(0.42, (0.145 - brow_dist) / 0.042)
+    
+    # Eyebrows lowered
+    if brow_height < -0.088:  # More sensitive
+        angry_score += min(0.38, abs(brow_height + 0.088) / 0.032)
+    
+    # Brow tension
+    if brow_tension > 6.8:  # More sensitive
+        angry_score += min(0.25, (brow_tension - 6.8) / 5.2)
+    
+    # Eyes narrowed
+    if eye_open < 0.062:  # More sensitive
+        angry_score += min(0.30, (0.062 - eye_open) / 0.032)
+    
+    if eye_tension > 0.62:  # More sensitive
+        angry_score += 0.20
+    
+    # Lips pressed
+    if lip_gap < 0.03:  # More sensitive
+        angry_score += 0.18
+    
+    if lip_compression < 0.09:  # More sensitive
+        angry_score += 0.16
+    
+    # Jaw tension
+    if jaw_width < 0.335:  # More sensitive
+        angry_score += min(0.20, (0.335 - jaw_width) / 0.052)
+    
+    if jaw_clench < 0.148:  # More sensitive
+        angry_score += min(0.16, (0.148 - jaw_clench) / 0.032)
+    
+    # Eyebrow angle
+    if brow_slant > 0.005:  # More sensitive
+        angry_score += min(0.18, brow_slant / 0.032)
+    
+    # Chin protrusion
+    if chin_protrusion > 0.17:  # More sensitive
+        angry_score += min(0.16, (chin_protrusion - 0.17) / 0.052)
+    
+    # Nose features
+    if nose_wrinkle > 0.038:  # More sensitive
+        angry_score += min(0.14, (nose_wrinkle - 0.038) / 0.042)
+    
+    if nostril_flare > 0.115:  # More sensitive
+        angry_score += 0.12
+    
+    # SOFTER EXCLUSIONS
+    if mouth_curve < -0.005:  # Only exclude clear smiles
+        angry_score *= 0.2
+    if brow_height > -0.065:  # Only exclude clearly raised brows
+        angry_score *= 0.3
+    if mouth_open > 0.06:  # Allow some mouth opening
+        angry_score *= 0.45
+    if cheek_raise > 0.013:  # Only exclude strong cheek raise
+        angry_score *= 0.35
+    if inner_brow_raise > 0.08:  # Only exclude strong inner raise
+        angry_score *= 0.4
+    if eye_open > 0.09:  # Only exclude very wide eyes
+        angry_score *= 0.45
+    
+    angry = max(0.0, min(1.0, angry_score * 1.5))
+
+    # ========================================
+    # SURPRISE DETECTION - Natural surprise/interest
+    # ========================================
+    surprise_score = 0.0
+    
+    # Eyebrows raised
+    if brow_height > -0.062:  # More sensitive
+        surprise_score += min(0.45, (brow_height + 0.062) / 0.048)
+    
+    # Eyes wide
+    if eye_open > 0.082:  # More sensitive
+        surprise_score += min(0.40, (eye_open - 0.082) / 0.058)
+    
+    # Jaw dropped
+    if mouth_open > 0.038:  # More sensitive
+        surprise_score += min(0.32, (mouth_open - 0.038) / 0.052)
+    
+    # Eyebrows arched
+    if brow_arch < -0.010:  # More sensitive
+        surprise_score += min(0.20, abs(brow_arch) / 0.020)
+    
+    # Brows wide apart
+    if brow_dist > 0.155:  # More sensitive
+        surprise_score += min(0.16, (brow_dist - 0.155) / 0.045)
+    
+    # Mouth O-shape
+    if 1.15 < mouth_ratio < 1.75 and mouth_open > 0.035:  # More relaxed
+        surprise_score += 0.18
+    
+    # Relaxed eyes
+    if eye_tension < 0.52 and eye_open > 0.078:  # More sensitive
+        surprise_score += 0.16
+    
+    # Nostrils flared
+    if nostril_flare > 0.125:  # More sensitive
+        surprise_score += 0.13
+    
+    # Neutral mouth curve
+    if abs(mouth_curve) < 0.007:  # More relaxed
+        surprise_score += 0.10
+    
+    # SOFTER EXCLUSIONS
+    if brow_dist < 0.138:  # Only exclude very furrowed
+        surprise_score *= 0.3
+    if brow_height < -0.082:  # Only exclude very lowered
+        surprise_score *= 0.35
+    if abs(mouth_curve) > 0.008:  # Allow some curve
+        surprise_score *= 0.4
+    if eye_tension > 0.65:  # Only exclude strong tension
+        surprise_score *= 0.45
+    if cheek_raise > 0.016:  # Only exclude strong raise
+        surprise_score *= 0.5
+    if lip_gap < 0.028:  # Only exclude very pressed lips
+        surprise_score *= 0.55
+    
+    surprise = max(0.0, min(1.0, surprise_score * 1.4))
+
+    # ========================================
+    # NEUTRAL CALCULATION
+    # More balanced - allow neutral when emotions are subtle
+    # ========================================
+    emotions_sum = happy + sad + angry + surprise
+    neutral = max(0.0, 1.0 - (emotions_sum * 1.3))  # Reduced multiplier
+
+    # ========================================
+    # NORMALIZATION
+    # ========================================
+    total = happy + sad + angry + surprise + neutral
+    if total > 0:
+        happy /= total
+        sad /= total
+        angry /= total
+        surprise /= total
+        neutral /= total
 
     return {
         "happy": float(happy),
@@ -278,26 +658,20 @@ def get_word_suggestions(partial_word, word_freq):
     return [m[0] for m in matches[:3]]
 
 def clear_camera_buffer(cap, num_frames=5):
-    """Clear camera buffer to reduce lag"""
     for _ in range(num_frames):
         cap.read()
 
-# -------------------------------
-# ---- DRAW HAND LANDMARKS ------
-# -------------------------------
-
 def draw_hand_landmarks(frame, hand_landmarks):
-    """Draw colored hand skeleton overlay"""
     mp_drawing = mp.solutions.drawing_utils
     mp_hands = mp.solutions.hands
     
     landmark_style = mp_drawing.DrawingSpec(
-        color=(0, 255, 0),  # Green dots
+        color=(0, 255, 0),
         thickness=3,
         circle_radius=4
     )
     connection_style = mp_drawing.DrawingSpec(
-        color=(0, 0, 255),  # Red lines
+        color=(0, 0, 255),
         thickness=2
     )
     
@@ -309,55 +683,29 @@ def draw_hand_landmarks(frame, hand_landmarks):
         connection_style
     )
 
-# -------------------------------
-# --- NEW: DRAW LETTER OVERLAY --
-# -------------------------------
-
 def draw_letter_overlay(frame, letter, confidence):
-    """
-    Draw detected letter and confidence on video frame
-    Similar to the image shown - displays in top-left corner
-    """
     if not SHOW_LETTER_OVERLAY:
         return frame
     
     if letter and confidence > 0:
-        # Format text: "S (1.00)"
         text_letter = f"{letter}"
         text_conf = f"({confidence:.2f})"
         
         x, y = OVERLAY_POSITION
         
-        # Add semi-transparent background for better visibility
         overlay = frame.copy()
         cv2.rectangle(overlay, (x-10, y-40), (x+180, y+20), (0, 0, 0), -1)
         frame = cv2.addWeighted(overlay, 0.6, frame, 0.4, 0)
         
-        # Draw letter in yellow
-        cv2.putText(
-            frame, 
-            text_letter, 
-            (x, y), 
-            cv2.FONT_HERSHEY_SIMPLEX, 
-            OVERLAY_FONT_SCALE, 
-            OVERLAY_COLOR_LETTER, 
-            OVERLAY_THICKNESS,
-            cv2.LINE_AA
-        )
+        cv2.putText(frame, text_letter, (x, y), 
+                   cv2.FONT_HERSHEY_SIMPLEX, OVERLAY_FONT_SCALE, 
+                   OVERLAY_COLOR_LETTER, OVERLAY_THICKNESS, cv2.LINE_AA)
         
-        # Draw confidence in cyan next to letter
         text_width = cv2.getTextSize(text_letter, cv2.FONT_HERSHEY_SIMPLEX, 
                                      OVERLAY_FONT_SCALE, OVERLAY_THICKNESS)[0][0]
-        cv2.putText(
-            frame, 
-            text_conf, 
-            (x + text_width + 10, y), 
-            cv2.FONT_HERSHEY_SIMPLEX, 
-            OVERLAY_FONT_SCALE * 0.7,  # Slightly smaller
-            OVERLAY_COLOR_CONF, 
-            OVERLAY_THICKNESS - 1,
-            cv2.LINE_AA
-        )
+        cv2.putText(frame, text_conf, (x + text_width + 10, y), 
+                   cv2.FONT_HERSHEY_SIMPLEX, OVERLAY_FONT_SCALE * 0.7, 
+                   OVERLAY_COLOR_CONF, OVERLAY_THICKNESS - 1, cv2.LINE_AA)
     
     return frame
 
@@ -366,12 +714,15 @@ def draw_letter_overlay(frame, letter, confidence):
 # -------------------------------
 
 def core_processing_engine(shared_state):
-    """Enhanced processing engine with letter overlay feature"""
+    print("🚀 Starting natural emotion detection (balanced sensitivity)...")
+    print("✨ Tuned for everyday expressions:")
+    print("   • HAPPY: Slight smiles, natural warmth")
+    print("   • SAD: Concern, mild unhappiness, thoughtfulness")
+    print("   • ANGRY: Frustration, annoyance, determination")
+    print("   • SURPRISE: Interest, mild surprise, curiosity")
+    print("   • NEUTRAL: Relaxed, neutral expressions")
+    print("   • Balanced fusion for natural, subtle emotions!")
     
-    print("🚀 Starting ENHANCED core processing engine...")
-    print("✨ Features: Hand overlay, Letter display, Auto-TTS, Emotion detection")
-    
-    # Load models
     try:
         model = load_model(ISL_MODEL_PATH)
         print("✅ ISL model loaded")
@@ -382,11 +733,9 @@ def core_processing_engine(shared_state):
     alphabet = list(string.ascii_uppercase)
     emotion_detector = FER(mtcnn=False)
     
-    # MediaPipe
     mp_hands = mp.solutions.hands
     mp_face = mp.solutions.face_mesh
     
-    # State variables
     buffer = []
     current_word = []
     sentence = []
@@ -396,22 +745,18 @@ def core_processing_engine(shared_state):
     hand_position_buffer = deque(maxlen=5)
     word_frequency = Counter()
     
-    # NEW: Track current detected letter and confidence for overlay
     current_detected_letter = ""
     current_confidence = 0.0
     
-    # Emotion tracking
     emotion_history = deque(maxlen=SMOOTHING_FRAMES)
     current_emotion = "neutral"
     emotion_scores = {e: 0.0 for e in EMOTIONS}
     emotion_timeline = deque(maxlen=100)
     last_emotion = "neutral"
     
-    # Performance tracking
     frame_count = 0
     last_fps_update = time.time()
     
-    # Stats
     stats = {
         "letters_detected": 0,
         "words_formed": 0,
@@ -420,15 +765,14 @@ def core_processing_engine(shared_state):
         "session_start": time.time()
     }
     
-    # Open camera
     cap = cv2.VideoCapture(CAM_INDEX)
     if not cap.isOpened():
         print("❌ Camera not found")
         return
     
-    print("🎥 Clearing camera buffer...")
+    print("✅ Clearing camera buffer...")
     clear_camera_buffer(cap, 10)
-    print("✅ Camera ready")
+    print("✅ Camera ready - Natural emotion mode active!")
     
     with mp_hands.Hands(model_complexity=0, max_num_hands=1,
                         min_detection_confidence=0.6, 
@@ -490,7 +834,6 @@ def core_processing_engine(shared_state):
             except:
                 pass
             
-            # Read frame
             ret, frame = cap.read()
             if not ret:
                 continue
@@ -508,10 +851,8 @@ def core_processing_engine(shared_state):
                 no_hand_frames = 0
                 
                 for hand_landmarks in hand_results.multi_hand_landmarks:
-                    # Draw hand skeleton
                     draw_hand_landmarks(frame, hand_landmarks)
                     
-                    # Check stability
                     wrist = hand_landmarks.landmark[0]
                     pos = np.array([wrist.x * frame.shape[1], wrist.y * frame.shape[0]])
                     hand_position_buffer.append(pos)
@@ -535,7 +876,6 @@ def core_processing_engine(shared_state):
                             
                             avg_conf = np.mean(letter_confidence_buffer) if letter_confidence_buffer else 0
                             
-                            # NEW: Update overlay display even before confirmation
                             predicted_letter = alphabet[int(np.argmax(pred))]
                             current_detected_letter = predicted_letter
                             current_confidence = avg_conf
@@ -576,13 +916,14 @@ def core_processing_engine(shared_state):
                         last_letter = None
                     no_hand_frames = 0
             
-            # NEW: Draw letter overlay on frame BEFORE emotion processing
             frame = draw_letter_overlay(frame, current_detected_letter, current_confidence)
             
-            # Emotion detection (unchanged)
+            # NATURAL EMOTION DETECTION with balanced weights
             frame_clahe = apply_clahe(frame)
             brightness = compute_brightness(frame_clahe)
             bright_scale = np.clip((brightness / 255.0)*1.2, 0.5, 1.0)
+            
+            # Landmarks are natural expression detection, balance with FER
             fer_weight = BASE_FER_WEIGHT * bright_scale
             landmark_weight = max(0.0, 1.0 - fer_weight)
             
@@ -612,12 +953,27 @@ def core_processing_engine(shared_state):
                 feats = extract_face_features(face_landmarks, frame.shape)
                 landmark_scores = landmark_scores_from_features(feats)
             
+            # BALANCED FUSION for natural expressions
             fused = {}
             for emo in EMOTIONS:
                 f = fer_subset.get(emo, 0.0)
                 l = landmark_scores.get(emo, 0.0)
-                fused_score = fer_weight * f + landmark_weight * l
+                
+                # Balanced approach - both methods contribute
+                if f > 0.12 and l > 0.12:
+                    # Both agree - boost confidence
+                    fused_score = fer_weight * f + landmark_weight * l * 1.15
+                else:
+                    # Standard fusion
+                    fused_score = fer_weight * f + landmark_weight * l
+                
                 fused[emo] = float(np.clip(fused_score, 0.0, 1.0))
+            
+            # Re-normalize after fusion
+            total_fused = sum(fused.values())
+            if total_fused > 0:
+                for emo in EMOTIONS:
+                    fused[emo] /= total_fused
             
             emotion_history.append(fused)
             avg_emotions = defaultdict(float)
@@ -631,7 +987,8 @@ def core_processing_engine(shared_state):
             if avg_emotions:
                 max_emo = max(avg_emotions, key=avg_emotions.get)
                 max_val = avg_emotions[max_emo]
-                dominant = max_emo if max_val >= MIN_CONF_TO_SHOW else "neutral"
+                # Much lower threshold for natural expressions
+                dominant = max_emo if max_val >= 0.08 else "neutral"
             else:
                 dominant = "neutral"
                 avg_emotions = {k:0.0 for k in EMOTIONS}
@@ -639,7 +996,11 @@ def core_processing_engine(shared_state):
             
             if current_emotion != dominant and dominant != last_emotion:
                 stats["emotion_changes"] += 1
-                print(f"😊 Emotion changed: {current_emotion} → {dominant}")
+                
+                # Natural emotion logging
+                scores_str = " | ".join([f"{k.upper()}:{avg_emotions[k]:.3f}" for k in EMOTIONS])
+                print(f"😊 Emotion: {current_emotion.upper()} → {dominant.upper()}")
+                print(f"   Scores: {scores_str}")
                 last_emotion = current_emotion
             
             current_emotion = dominant
@@ -684,7 +1045,6 @@ def core_processing_engine(shared_state):
                     "fps": shared_state.processing_fps.value,
                     "timestamp": time.time(),
                     "speaking": speaking_word,
-                    # NEW: Send overlay info for dashboard display too
                     "overlay_letter": current_detected_letter,
                     "overlay_confidence": current_confidence
                 }
@@ -709,7 +1069,7 @@ def core_processing_engine(shared_state):
                 clear_camera_buffer(cap, 2)
     
     cap.release()
-    print("✅ Enhanced core processor stopped")
+    print("✅ Emotion detector stopped - Natural expression mode complete!")
 
 if __name__ == "__main__":
     shared_state = SharedState()
