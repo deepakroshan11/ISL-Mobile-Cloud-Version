@@ -3,6 +3,9 @@
 # Enhanced sensitivity for happy, sad, angry, surprise detection
 
 import cv2
+import tensorflow as tf  # TFLite support
+import translation  # LLM translation wrapper
+
 import mediapipe as mp
 import numpy as np
 import pandas as pd
@@ -71,6 +74,37 @@ class SharedState:
         self.command_queue = Queue(maxsize=10)
         self.fps = Value(ctypes.c_double, 0.0)
         self.processing_fps = Value(ctypes.c_double, 0.0)
+        # Buffer for dynamic gesture sequences (30 frames by default)
+        self.sequence_buffer = SequenceBuffer(max_len=30)
+        # Flag to switch between static letter model and dynamic sequence model
+        self.use_sequence_model = False
+        # Load TFLite sequence model if available
+        try:
+            self.tflite_interpreter = tf.lite.Interpreter(model_path="sequence_model.tflite")
+            self.tflite_interpreter.allocate_tensors()
+            self.use_sequence_model = True
+            print("✅ TFLite sequence model loaded")
+        except Exception as e:
+            self.tflite_interpreter = None
+            print(f"⚠️  TFLite sequence model not loaded: {e}")
+
+class SequenceBuffer:
+    """Circular buffer that stores a fixed number of feature vectors for temporal modeling."""
+    def __init__(self, max_len: int = 30):
+        self.max_len = max_len
+        self.buffer = []
+
+    def add(self, features):
+        self.buffer.append(features)
+        if len(self.buffer) > self.max_len:
+            self.buffer.pop(0)
+
+    def is_full(self):
+        return len(self.buffer) == self.max_len
+
+    def get_batch(self):
+        return np.array(self.buffer, dtype=np.float32)
+
 
 # -------------------------------
 # --------- TTS ENGINE ----------
@@ -774,7 +808,7 @@ def core_processing_engine(shared_state):
     clear_camera_buffer(cap, 10)
     print("✅ Camera ready - Natural emotion mode active!")
     
-    with mp_hands.Hands(model_complexity=0, max_num_hands=1,
+    with mp_hands.Hands(model_complexity=0, max_num_hands=2,
                         min_detection_confidence=0.6, 
                         min_tracking_confidence=0.6) as hands, \
          mp_face.FaceMesh(static_image_mode=False, max_num_faces=1,
@@ -1026,6 +1060,7 @@ def core_processing_engine(shared_state):
             suggestions = get_word_suggestions(current_display, word_frequency)
             
             # Prepare data packet for UI
+            translation_text = translation.translate_signs(current_word)
             try:
                 _, buffer_img = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
                 frame_bytes = buffer_img.tobytes()
@@ -1046,7 +1081,8 @@ def core_processing_engine(shared_state):
                     "timestamp": time.time(),
                     "speaking": speaking_word,
                     "overlay_letter": current_detected_letter,
-                    "overlay_confidence": current_confidence
+                    "overlay_confidence": current_confidence,
+                    "translation": translation_text
                 }
                 
                 if shared_state.ui_queue.full():

@@ -383,6 +383,113 @@
             color: white;
             text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
         }
+        /* NAVIGATION BAR */
+.top-nav {
+    background: rgba(10, 14, 39, 0.95);
+    backdrop-filter: blur(20px);
+    padding: 0.75rem 1.5rem;
+    border-bottom: 2px solid rgba(96, 165, 250, 0.3);
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.4);
+    position: sticky;
+    top: 0;
+    z-index: 1000;
+}
+
+.top-nav-content {
+    max-width: 1800px;
+    margin: 0 auto;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 1rem;
+}
+
+.nav-btn {
+    padding: 0.7rem 1.5rem;
+    border: 2px solid rgba(96, 165, 250, 0.3);
+    border-radius: 10px;
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    background: rgba(30, 41, 59, 0.6);
+    color: #e2e8f0;
+}
+
+.nav-btn:hover {
+    background: rgba(96, 165, 250, 0.2);
+    border-color: rgba(96, 165, 250, 0.6);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(96, 165, 250, 0.3);
+}
+
+.nav-btn.active {
+    background: linear-gradient(135deg, #3b82f6, #2563eb);
+    border-color: transparent;
+    color: white;
+    box-shadow: 0 4px 15px rgba(59, 130, 246, 0.4);
+}
+
+.nav-icon {
+    font-size: 1.2rem;
+}
+
+@media (max-width: 768px) {
+    .top-nav-content {
+        flex-direction: column;
+        gap: 0.5rem;
+    }
+}
+/* SMOOTH PAGE TRANSITIONS */
+body {
+    animation: fadeIn 0.3s ease-in;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* Navigation button transition */
+.nav-btn {
+    position: relative;
+    overflow: hidden;
+}
+
+.nav-btn::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 50%;
+    width: 0;
+    height: 2px;
+    background: linear-gradient(90deg, #3b82f6, #2563eb);
+    transform: translateX(-50%);
+    transition: width 0.3s ease;
+}
+
+.nav-btn:hover::after {
+    width: 80%;
+}
+
+.nav-btn.active::after {
+    width: 100%;
+}
+
+/* Adjust container top margin for fingerspelling */
+.container {
+    margin-top: 0;
+}
         
         /* COMPACT CHART */
         .chart-panel {
@@ -422,6 +529,7 @@
     </style>
 </head>
 <body>
+    <div class="header">
     <div class="header">
         <div class="header-content">
             <div class="logo-section">
@@ -558,7 +666,6 @@
             
             const emotions = ['happy', 'sad', 'angry', 'surprise', 'neutral'];
             const socket = io('/isl');
-            
             const emotionIcons = {
                 'happy': '😊',
                 'sad': '😢',
@@ -806,4 +913,18 @@
             console.log('💡 Tip: Use Ctrl+S to speak text');
         });
     </script>
+         <!-- NAVIGATION BAR -->
+    <div class="top-nav">
+        <div class="top-nav-content">
+            <a href="http://localhost:5000" class="nav-btn active">
+                <span class="nav-icon">😊</span>
+                <span>Emotion Translator</span>
+            </a>
+            <a href="http://localhost:5001" class="nav-btn">
+                <span class="nav-icon">🤟</span>
+                <span>Speech-to-Sign</span>
+            </a>
+        </div>
+    </div>
 </body>
+ 

@@ -62,7 +62,8 @@ def data_receiver_thread():
                     'detected_letter': data['detected_letter'],
                     'hand_detected': data['hand_detected'],
                     'fps': round(data['fps'], 1),
-                    'timestamp': data['timestamp']
+                    'timestamp': data['timestamp'],
+                    'translation': data.get('translation', '')
                 }
             
             # Broadcast to all connected clients
