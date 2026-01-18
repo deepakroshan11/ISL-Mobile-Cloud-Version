@@ -1,4 +1,4 @@
-﻿# 🤟 Indian Sign Language Detection with Emotion Recognition
+﻿# 🤟 Indian Sign Language Detection System
 
 <div align="center">
 
@@ -8,9 +8,9 @@
 ![Flask](https://img.shields.io/badge/Flask-2.3+-red.svg)
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 
-**Real-time ISL recognition system with AI-powered emotion detection and professional web dashboard**
+**Comprehensive ISL system with dual applications: Real-time Emotion Recognition + Speech-to-Sign Avatar Translation**
 
-[Features](#-features) • [Quick Start](#-quick-start) • [Architecture](#️-architecture) • [Usage](#-usage) • [Documentation](#-documentation)
+[Features](#-features) • [Quick Start](#-quick-start) • [Applications](#-applications) • [Architecture](#️-architecture) • [Usage](#-usage) • [Documentation](#-documentation)
 
 </div>
 
@@ -18,42 +18,64 @@
 
 ## ✨ Features
 
-### 🎯 Core Functionality
+### 🎯 Dual Application System
+- **Emotion Translator (Port 5000)** - Real-time ISL recognition with AI emotion detection
+- **Speech-to-Sign Avatar (Port 5001)** - Text/speech to animated 3D ISL gestures
+- **Seamless Navigation** - Switch between apps with integrated navigation bar
+- **Unified Launcher** - Start both applications simultaneously
+- **Consistent UI** - Modern glassmorphism design across both apps
+
+### 🎭 **Application 1: ISL Emotion Translator**
+
+#### Core Functionality
 - **Real-time Hand Tracking** - MediaPipe-based hand landmark detection
 - **ISL Letter Recognition** - TensorFlow CNN model for A-Z alphabet recognition
-- **Letter Confidence Overlay** - Live display of detected letter and accuracy on video feed
-- **Smart Word Formation** - Automatic word completion with hand stability checking
-- **Sentence Building** - Context-aware sentence construction with spacing detection
+- **Letter Confidence Overlay** - Live display of detected letter and accuracy
+- **Smart Word Formation** - Automatic word completion with stability checking
+- **Sentence Building** - Context-aware sentence construction
 
-### 😊 Emotion Detection
-- **Dual-Engine Emotion AI** - Combines FER (Facial Expression Recognition) + Custom Landmark Analysis
+#### Emotion Detection
+- **Dual-Engine Emotion AI** - FER + Custom Landmark Analysis
 - **5 Emotion Categories** - Happy, Sad, Angry, Surprise, Neutral
-- **Adaptive Fusion** - Dynamic weighting based on lighting conditions (CLAHE enhancement)
+- **Adaptive Fusion** - Dynamic weighting based on lighting (CLAHE)
 - **Temporal Smoothing** - 15-frame rolling average for stability
-- **Real-time Timeline** - Live emotion tracking graph with Chart.js
+- **Real-time Timeline** - Live emotion tracking with Chart.js
 
-### 🎨 Professional Web Dashboard
-- **Modern Glassmorphism UI** - Beautiful gradient design with blur effects
-- **Real-time Updates** - Socket.IO for zero-lag WebSocket communication
-- **Live Statistics Panel** - FPS, letters detected, words formed, sentences, emotion changes
-- **Smart Word Suggestions** - Frequency-based word predictions (top 3)
-- **Interactive Controls** - Speak (TTS), Reset, Backspace buttons
-- **Emotion Visualization** - Live progress bars + timeline chart
+#### Professional Dashboard
+- **Modern Glassmorphism UI** - Beautiful gradients with blur effects
+- **Real-time Updates** - Socket.IO WebSocket communication
+- **Live Statistics** - FPS, letters, words, sentences, emotion changes
+- **Smart Suggestions** - Frequency-based word predictions
+- **Interactive Controls** - Speak (TTS), Reset, Backspace
+- **Emotion Visualization** - Progress bars + timeline chart
 
-### 🔊 Text-to-Speech Integration
-- **Auto-TTS** - Automatically speaks words as they're formed
-- **Non-blocking Audio** - Runs in separate thread for smooth performance
-- **gTTS Integration** - Natural voice synthesis via Google Text-to-Speech
-- **Pygame Audio Engine** - Reliable cross-platform playback
-- **Audio Cleanup Utility** - Automatic removal of temporary MP3 files
+### 🎤 **Application 2: Speech-to-Sign Avatar**
 
-### ⚡ Performance Optimizations
-- **Multi-process Architecture** - Separate processes for CV processing and web UI
-- **IPC Queue Communication** - Fast inter-process data transfer
-- **Dynamic Frame Management** - Maintains target 30 FPS with adaptive skipping
-- **CLAHE Enhancement** - Contrast-Limited Adaptive Histogram Equalization for low-light performance
-- **Camera Buffer Management** - Reduces frame latency
-- **Hand Skeleton Overlay** - Visual feedback with colored landmarks and connections
+#### Speech Recognition
+- **Real-time Speech Input** - Google Speech Recognition API
+- **Multi-language Support** - English (en-IN) and Hindi (hi-IN)
+- **Adaptive Noise Handling** - Automatic ambient noise adjustment
+- **Phrase Detection** - 10-second phrase limit with timeout handling
+
+#### 3D Avatar Animation
+- **40+ ISL Gestures** - Complete gesture library with keyframe animations
+- **Categories Covered:**
+  - Greetings (Hello, Hi, Goodbye, Bye)
+  - Politeness (Please, Thank You, Sorry, Welcome)
+  - Pronouns (I, You, We, They)
+  - Basic Responses (Yes, No, OK, Good, Bad)
+  - Actions (Want, Need, Help, Go, Come, Stop, Sit, Stand)
+  - Food & Drink (Water, Food, Eat, Drink)
+  - Places (Home, School, Work)
+  - Emotions (Happy, Sad, Angry)
+  - Time (Morning, Afternoon, Evening, Night, Today, Tomorrow, Yesterday)
+  - Questions (How, What, Where, When, Why)
+
+#### Text-to-Sign Conversion
+- **Fingerspelling** - Letter-by-letter spelling for unknown words
+- **Smooth Animations** - Interpolated keyframe transitions
+- **Performance Stats** - Track conversions and gesture usage
+- **Translation Engine** - Sign-to-English conversion support
 
 ---
 
@@ -61,7 +83,8 @@
 
 ### Prerequisites
 - **Python 3.8+**
-- **Webcam** (720p or higher recommended)
+- **Webcam** (for Emotion Translator - 720p+ recommended)
+- **Microphone** (for Speech-to-Sign - optional)
 - **4GB+ RAM**
 - **Windows / Linux / macOS**
 
@@ -89,271 +112,411 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-4. **Verify Model File**
-Ensure model.h5 exists in the project root (pre-trained ISL model included).
+### 📦 Required Dependencies
+```
+tensorflow>=2.10.0
+opencv-python>=4.8.0
+mediapipe>=0.10.0
+numpy>=1.23.0
+pandas>=2.0.0
+fer>=22.5.0
+gtts>=2.3.0
+pygame>=2.5.0
+flask>=2.3.0
+flask-socketio>=5.3.0
+python-socketio>=5.9.0
+SpeechRecognition>=3.10.0
+PyAudio>=0.2.13
+```
 
-### Running the Application
+---
 
-**Method 1: Unified Launcher** (Recommended)
+## 🎮 Applications
+
+### **App 1: ISL Emotion Translator**
+
+**Start the Application:**
 ```bash
+# Method 1: Unified launcher (starts both apps)
+python unified_launcher.py
+
+# Method 2: Manual start (Emotion Translator only)
 python launcher.py
 ```
-This automatically starts both the core processor and web dashboard in separate processes.
 
-**Method 2: Manual Launch**
-```bash
-# Terminal 1: Start core processing engine
-python isl_detection.py
-
-# Terminal 2: Start web dashboard
-python isl_ui_dashboard.py
-```
-
-### Access the Dashboard
-Open your browser and navigate to:
+**Access Dashboard:**
 ```
 http://localhost:5000
 ```
+
+**Features:**
+- Real-time webcam-based ISL letter detection
+- Live emotion tracking from facial expressions
+- Word suggestions and sentence formation
+- Text-to-speech output
+- Interactive statistics dashboard
+
+---
+
+### **App 2: Speech-to-Sign Avatar**
+
+**Start the Application:**
+```bash
+# Method 1: Unified launcher (recommended)
+python unified_launcher.py
+
+# Method 2: Manual start (Avatar only)
+python speech_to_sign_avatar.py
+```
+
+**Access Interface:**
+```
+http://localhost:5001
+```
+
+**Features:**
+- Type or speak text to convert to ISL signs
+- 3D animated hand displays gestures
+- 40+ pre-programmed ISL gestures
+- Automatic fingerspelling for unknown words
+- Real-time speech recognition
+
+---
+
+## 🔄 Navigation Between Apps
+
+Both applications include an integrated navigation bar at the top:
+
+```
+┌─────────────────────────────────────────────────┐
+│  😊 Emotion Translator  |  🤟 Speech-to-Sign   │
+└─────────────────────────────────────────────────┘
+```
+
+**Navigation Features:**
+- Click buttons to switch between applications
+- Active app highlighted with gradient background
+- Smooth page transitions with fade animations
+- Consistent UI design across both apps
+- Hover effects for better UX
+
+---
+
+## 🏗️ Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│           UNIFIED LAUNCHER (unified_launcher.py)            │
+│         Manages both applications in parallel               │
+└──────────────┬──────────────────────────┬───────────────────┘
+               │                          │
+               ▼                          ▼
+┌──────────────────────────┐   ┌──────────────────────────────┐
+│  EMOTION TRANSLATOR      │   │  SPEECH-TO-SIGN AVATAR       │
+│  (Port 5000)             │   │  (Port 5001)                 │
+│                          │   │                              │
+│  ┌────────────────────┐  │   │  ┌─────────────────────────┐ │
+│  │  Core Processor    │  │   │  │  Flask Backend          │ │
+│  │  - MediaPipe       │  │   │  │  - Speech Recognition   │ │
+│  │  - TensorFlow      │  │   │  │  - Gesture Database     │ │
+│  │  - FER Emotions    │  │   │  │  - Socket.IO Server     │ │
+│  └────────────────────┘  │   │  └─────────────────────────┘ │
+│           ↕              │   │             ↕                │
+│  ┌────────────────────┐  │   │  ┌─────────────────────────┐ │
+│  │  Flask Dashboard   │  │   │  │  3D Avatar Frontend     │ │
+│  │  - Socket.IO       │  │   │  │  - Three.js Animation   │ │
+│  │  - Real-time UI    │  │   │  │  - Keyframe System      │ │
+│  │  - Chart.js        │  │   │  │  - Audio Playback       │ │
+│  └────────────────────┘  │   │  └─────────────────────────┘ │
+└──────────────────────────┘   └──────────────────────────────┘
+          ↕                                  ↕
+   📹 Webcam Input                   🎤 Microphone Input
+```
+
+### Translation Module
+
+The `translation.py` module provides bidirectional conversion:
+
+```python
+from translation import translate_signs
+
+# Convert sign tokens to English
+signs = ["HELLO", "I", "WANT", "WATER"]
+english = translate_signs(signs)
+# Output: "Hello I want water"
+```
+
+**Features:**
+- 50+ sign-to-English mappings
+- Fingerspell handling (SPELL_* tokens)
+- Grammar improvements
+- Extensible dictionary
 
 ---
 
 ## 🎮 Usage
 
-### Keyboard Shortcuts
+### Emotion Translator Usage
+
+**Keyboard Shortcuts:**
 
 | Shortcut | Action |
 |----------|--------|
-| **Ctrl + R** | Reset entire session (clear all words and sentences) |
-| **Ctrl + Backspace** | Delete last letter or word |
-| **1** / **2** / **3** | Accept word suggestions 1, 2, or 3 |
-| **Ctrl + C** | Stop application (in terminal) |
+| **Ctrl + R** | Reset session |
+| **Ctrl + Backspace** | Delete last letter/word |
+| **Ctrl + S** | Speak current text |
+| **1 / 2 / 3** | Accept suggestions |
 
-### Dashboard Controls
+**Dashboard Controls:**
+- **🔊 Speak** - Text-to-speech output
+- **⌫ Back** - Remove last character
+- **🔄 Reset** - Clear everything
 
-- **🔊 Speak Button** - Text-to-speech for current sentence
-- **⌫ Backspace** - Remove last letter/word
-- **🔄 Reset** - Clear session and start fresh
-
-### How It Works
-
-1. **Position your hand** in front of the webcam
-2. **Make ISL letter signs** - The system detects hand landmarks
-3. **Hold steady** - System confirms letter when confidence is high
-4. **Word formation** - Remove hand for 15 frames to complete a word
-5. **Suggestions** - Click on suggested words or press 1/2/3
-6. **Emotion tracking** - Your facial emotions are tracked in real-time
+**Workflow:**
+1. Position hand in front of webcam
+2. Make ISL letter signs
+3. Hold steady for detection
+4. Remove hand to complete word
+5. Click suggestions or continue signing
 
 ---
 
-## 🏗️ Architecture
-```
-┌──────────────────────────────────────────────────────────┐
-│               LAUNCHER PROCESS (launcher.py)              │
-│           Manages multi-process lifecycle                │
-└────────────┬────────────────────────────┬─────────────────┘
-             │                            │
-             ▼                            ▼
-┌────────────────────────┐      ┌─────────────────────────┐
-│   CORE PROCESSOR       │      │    WEB DASHBOARD        │
-│  (isl_detection.py)    │◄────►│  (isl_ui_dashboard.py)  │
-│                        │ IPC  │                         │
-│ • MediaPipe Hands      │Queue │ • Flask Server          │
-│ • TensorFlow Model     │      │ • Socket.IO WebSocket   │
-│ • FER + Landmarks      │      │ • Real-time Broadcast   │
-│ • Letter Detection     │      │ • Chart.js Graphs       │
-│ • Emotion Fusion       │      │ • Command Processing    │
-│ • TTS Engine           │      │                         │
-│ • Camera Buffer Mgmt   │      │                         │
-└────────────────────────┘      └─────────────────────────┘
-             │                            │
-             ▼                            ▼
-    📹 Webcam Input              🌐 Browser Client (Port 5000)
-```
+### Speech-to-Sign Avatar Usage
 
-### Data Flow
+**Input Methods:**
 
-1. **Camera Frame** → MediaPipe → Hand Landmarks Extraction
-2. **Landmarks** → TensorFlow CNN Model → Letter Prediction (A-Z)
-3. **Video Frame** → FER Model → Facial Emotion Scores
-4. **Video Frame** → MediaPipe Face Mesh → Custom Landmark Features
-5. **Emotion Fusion** → Weighted Average (FER + Landmarks) → Final Emotion
-6. **Data Packet** → IPC Queue (JPEG encoded + metadata)
-7. **Flask Server** → Socket.IO → Browser WebSocket
-8. **Browser** → Real-time Dashboard Updates (30 FPS)
+**Method 1: Text Input**
+1. Type text in the input box
+2. Click "Convert to Signs"
+3. Watch avatar animate the signs
+
+**Method 2: Speech Input**
+1. Click "🎤 Record Speech"
+2. Speak clearly when prompted
+3. Avatar automatically displays signs
+
+**Features:**
+- Real-time gesture animation
+- Automatic fingerspelling fallback
+- Performance statistics tracking
+- Sign playback controls
 
 ---
 
-## 📊 Configuration
+## 🔧 Configuration
 
-Edit isl_detection.py to customize behavior:
+### Emotion Translator Settings
+
+Edit `isl_detection.py`:
 ```python
-# Camera Settings
-CAM_INDEX = 0                    # Camera device index (0, 1, 2...)
+# Camera
+CAM_INDEX = 0
 
-# Detection Parameters
-BUFFER_SIZE = 12                 # Letter stability buffer size
-CONF_THRESHOLD = 0.8             # Minimum confidence to accept letter
-STABILITY_THRESHOLD = 0.7        # Hand stability threshold
-SPACE_THRESHOLD = 15             # Frames before word separation
-SENTENCE_DELAY = 2.0             # Seconds delay for sentence formation
+# Detection
+BUFFER_SIZE = 12
+CONF_THRESHOLD = 0.8
+STABILITY_THRESHOLD = 0.7
+SPACE_THRESHOLD = 15
+SENTENCE_DELAY = 2.0
 
-# Display Settings
-SHOW_LETTER_OVERLAY = True       # Show detected letter on video feed
-OVERLAY_POSITION = (20, 50)      # Letter overlay position (x, y)
-OVERLAY_FONT_SCALE = 1.5         # Font size for overlay
-OVERLAY_COLOR_LETTER = (0, 255, 255)  # Yellow (BGR)
-OVERLAY_COLOR_CONF = (255, 255, 0)    # Cyan (BGR)
+# Emotion
+SMOOTHING_FRAMES = 15
+BASE_FER_WEIGHT = 0.65
+BASE_LANDMARK_WEIGHT = 0.35
 
-# Emotion Detection
-SMOOTHING_FRAMES = 15            # Temporal smoothing window
-BASE_FER_WEIGHT = 0.65           # FER model weight in fusion
-BASE_LANDMARK_WEIGHT = 0.35      # Landmark model weight in fusion
-MIN_CONF_TO_SHOW = 0.25          # Minimum confidence to display emotion
+# TTS
+ENABLE_AUTO_TTS = True
+TTS_LANGUAGE = "en"
+```
 
-# TTS Settings
-ENABLE_AUTO_TTS = True           # Auto-speak words when formed
-TTS_LANGUAGE = "en"              # Voice language (en, es, fr, etc.)
+### Speech-to-Sign Avatar Settings
+
+Edit `speech_to_sign_avatar.py`:
+```python
+# Server
+PORT = 5001
+HOST = '0.0.0.0'
+
+# Speech Recognition
+ENERGY_THRESHOLD = 4000
+PAUSE_THRESHOLD = 0.8
+TIMEOUT = 5
+PHRASE_TIME_LIMIT = 10
+
+# Languages
+LANGUAGES = ['en-IN', 'hi-IN']
 ```
 
 ---
 
 ## 📁 Project Structure
+
 ```
 Indian-Sign-Language-Detection/
 │
-├── 📄 launcher.py                    # Multi-process unified launcher
-├── 📄 isl_detection.py               # Core CV + ML processing engine
-├── 📄 isl_ui_dashboard.py            # Flask web server + Socket.IO
-├── 📄 cleanup_audio_files.py         # TTS audio cleanup utility
-├── 📄 dataset_keypoint_generation.py # Data collection script
+├── 📄 unified_launcher.py            # Start both apps
+├── 📄 launcher.py                    # Emotion translator launcher
+├── 📄 isl_detection.py               # Core CV processing
+├── 📄 isl_ui_dashboard.py            # Emotion dashboard
+├── 📄 speech_to_sign_avatar.py       # Avatar backend
+├── 📄 translation.py                 # Sign-English conversion
+├── 📄 cleanup_audio_files.py         # Audio cleanup utility
+├── 📄 dataset_keypoint_generation.py # Data collection
 │
-├── 🤖 model.h5                       # Trained TensorFlow ISL model (11.5 MB)
-├── 📊 keypoint.csv                   # Training dataset landmarks
+├── 🤖 model.h5                       # Trained ISL model (11.5 MB)
+├── 📊 keypoint.csv                   # Training dataset
 │
 ├── 📁 templates/
-│   ├── dashboard.html                # Professional web UI
-│   └── dashboard.html.backup         # Backup copy
+│   ├── dashboard.html                # Emotion translator UI
+│   ├── avatar_interface.html         # Speech-to-sign UI
+│   └── dashboard.html.backup         # Backup
 │
-├── 📁 dataset/                       # Raw training images
-├── 📁 images/                        # Collected hand gesture images
-├── 📁 __pycache__/                   # Python cache (ignored)
+├── 📁 dataset/                       # Training images
+├── 📁 images/                        # Collected gestures
+├── 📁 tmp_audio/                     # TTS audio cache
 │
-├── 📋 requirements.txt               # Python dependencies
+├── 📋 requirements.txt               # Dependencies
 ├── 📋 .gitignore                     # Git ignore rules
 └── 📋 README.md                      # This file
 ```
 
 ---
 
-## 🔧 Troubleshooting
+## 🛠️ Troubleshooting
 
-### Issue: Camera Not Detected
+### Common Issues
+
+**Issue: Port Already in Use**
+```bash
+# Find process using port
+netstat -ano | findstr :5000
+netstat -ano | findstr :5001
+
+# Kill process (Windows)
+taskkill /PID <PID> /F
+
+# Or change port in code
+# emotion translator: port=5000
+# avatar: port=5001
+```
+
+**Issue: Camera Not Detected**
 ```python
-# In isl_detection.py, change camera index:
-CAM_INDEX = 1  # Try different values: 0, 1, 2...
+# Try different camera index
+CAM_INDEX = 1  # Change in isl_detection.py
 ```
 
-### Issue: Low Frame Rate
-- Close other resource-intensive applications
-- Reduce SMOOTHING_FRAMES value
-- Disable CLAHE: Comment out pply_clahe() calls
-- Lower webcam resolution in system settings
-
-### Issue: TTS Files Not Deleted
+**Issue: PyAudio Installation Failed (Windows)**
 ```bash
-python cleanup_audio_files.py
+# Download wheel from: https://www.lfd.uci.edu/~gohlke/pythonlibs/#pyaudio
+pip install PyAudio-0.2.13-cp38-cp38-win_amd64.whl
 ```
 
-### Issue: Port 5000 Already in Use
-```python
-# In isl_ui_dashboard.py, change:
-socketio.run(app, host='0.0.0.0', port=5001)
-```
-
-### Issue: Model Not Loading
-- Verify model.h5 exists in project root
-- Check TensorFlow version: pip show tensorflow
-- Reinstall TensorFlow: pip install --upgrade tensorflow
-
-### Issue: MediaPipe Errors
+**Issue: Microphone Not Working**
 ```bash
-pip uninstall mediapipe
-pip install mediapipe --no-cache-dir
+# Grant microphone permissions
+# Windows: Settings → Privacy → Microphone → Allow apps
+# Mac: System Preferences → Security & Privacy → Microphone
 ```
 
----
-
-## 🎓 Training Your Own Model
-
-1. **Collect Training Data**
+**Issue: Speech Recognition Not Working**
 ```bash
-python dataset_keypoint_generation.py
-```
-Follow the prompts to capture hand images for each ISL letter (A-Z).
-
-2. **Generate Keypoint CSV**
-The script automatically creates keypoint.csv with landmark coordinates.
-
-3. **Train Model**
-Use the provided Jupyter notebook ISL_classifier.ipynb or create your own training script.
-
-4. **Replace Model**
-```bash
-# Backup old model
-mv model.h5 model_backup.h5
-
-# Use your new model
-cp your_trained_model.h5 model.h5
+# Check internet connection (Google API required)
+# Or adjust energy threshold
+recognizer.energy_threshold = 2000  # Lower value
 ```
 
 ---
 
 ## 📊 Performance Metrics
 
-- **Frame Rate**: 25-30 FPS (real-time)
-- **Letter Detection Accuracy**: ~95% (with trained model)
-- **Emotion Detection Latency**: <50ms per frame
-- **Hand Landmark Detection**: 21 points tracked
-- **Face Landmark Detection**: 468 points tracked
-- **Dashboard Update Rate**: Real-time via WebSocket
+### Emotion Translator
+- **Frame Rate**: 25-30 FPS
+- **Letter Accuracy**: ~95%
+- **Emotion Latency**: <50ms/frame
+- **Hand Landmarks**: 21 points
+- **Face Landmarks**: 468 points
+
+### Speech-to-Sign Avatar
+- **Gesture Library**: 40+ signs
+- **Animation FPS**: 60 FPS
+- **Speech Recognition**: <2s latency
+- **Fingerspelling Speed**: 2 letters/second
+- **Conversion Rate**: Real-time
+
+---
+
+## 🎓 Training Custom Models
+
+### Collect Training Data
+```bash
+python dataset_keypoint_generation.py
+```
+
+### Add Custom Gestures
+
+Edit `speech_to_sign_avatar.py`:
+```python
+ISL_GESTURES["your_word"] = {
+    "name": "YOUR_WORD",
+    "keyframes": [
+        {"hand": "right", "pos": [x, y, z], "rot": [rx, ry, rz], "time": 0.0},
+        {"hand": "right", "pos": [x2, y2, z2], "rot": [rx2, ry2, rz2], "time": 1.0}
+    ],
+    "duration": 1.5,
+    "desc": "Description",
+    "type": "sign"
+}
+```
+
+### Add Translations
+
+Edit `translation.py`:
+```python
+_TRANSLATION_MAP["YOUR_SIGN"] = "English translation"
+```
 
 ---
 
 ## 🤝 Contributing
 
-Contributions are welcome! Here's how you can help:
+Contributions welcome! Areas for improvement:
 
-1. **Fork the repository**
-2. **Create a feature branch**: git checkout -b feature/AmazingFeature
-3. **Commit your changes**: git commit -m 'Add AmazingFeature'
-4. **Push to branch**: git push origin feature/AmazingFeature
-5. **Open a Pull Request**
-
-### Areas for Contribution
-- [ ] Add more ISL gestures (words, phrases)
+- [ ] Add more ISL gestures and words
 - [ ] Improve emotion detection accuracy
-- [ ] Add multi-language support for TTS
-- [ ] Create mobile app version
-- [ ] Add training data augmentation
-- [ ] Optimize model for edge devices
+- [ ] Multi-language TTS support
+- [ ] Mobile app version
+- [ ] Offline speech recognition
+- [ ] Real-time sign translation (both directions)
+- [ ] Training data augmentation
+- [ ] Edge device optimization
+
+**How to Contribute:**
+1. Fork the repository
+2. Create feature branch: `git checkout -b feature/AmazingFeature`
+3. Commit changes: `git commit -m 'Add AmazingFeature'`
+4. Push to branch: `git push origin feature/AmazingFeature`
+5. Open Pull Request
 
 ---
 
 ## 📜 License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+MIT License - see [LICENSE](LICENSE) file for details.
 
 ---
 
 ## 🙏 Acknowledgments
 
-- **MediaPipe** - Real-time hand and face landmark detection
+- **MediaPipe** - Hand and face landmark detection
 - **TensorFlow** - Deep learning framework
-- **FER (Facial Expression Recognition)** - Pre-trained emotion detection
-- **Flask + Socket.IO** - Real-time web communication
-- **Chart.js** - Beautiful data visualization
-- **gTTS** - Google Text-to-Speech API
-- **Pygame** - Cross-platform audio playback
+- **FER** - Facial emotion recognition
+- **Flask + Socket.IO** - Real-time web framework
+- **Three.js** - 3D avatar animation
+- **Chart.js** - Data visualization
+- **gTTS** - Google Text-to-Speech
+- **SpeechRecognition** - Python speech library
+- **Pygame** - Audio playback
 
 ---
 
@@ -367,10 +530,30 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 🌟 Show Your Support
 
-If this project helped you, please consider:
+If this project helped you:
 - ⭐ **Star this repository**
 - 🍴 **Fork and contribute**
 - 📢 **Share with others**
+- 💬 **Report issues**
+- 📝 **Improve documentation**
+
+---
+
+## 📸 Screenshots
+
+### Emotion Translator Dashboard
+- Live webcam feed with ISL detection
+- Real-time emotion tracking bars
+- Smart word suggestions panel
+- Emotion timeline graph
+- Professional glassmorphism UI
+
+### Speech-to-Sign Avatar Interface
+- 3D animated hand display
+- Text and speech input options
+- Gesture library visualization
+- Performance statistics
+- Integrated navigation bar
 
 ---
 
@@ -381,5 +564,8 @@ If this project helped you, please consider:
 ![ISL](https://img.shields.io/badge/ISL-Indian_Sign_Language-blue)
 ![Accessibility](https://img.shields.io/badge/Accessibility-First-green)
 ![Open Source](https://img.shields.io/badge/Open_Source-Yes-orange)
+![Dual Apps](https://img.shields.io/badge/Apps-Emotion_+_Avatar-purple)
+
+**Version 2.0 - Now with Speech-to-Sign Avatar System**
 
 </div>
