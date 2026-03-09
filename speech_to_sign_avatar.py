@@ -3,13 +3,16 @@ ISL Fingerspelling System - Backend Server
 Full A-Z Letter-by-Letter Speech-to-Sign Conversion
 
 Install dependencies:
-pip install SpeechRecognition flask flask-socketio pyaudio
+pip install SpeechRecognition flask flask-socketio eventlet
 
 Usage:
 python speech_to_sign_avatar_fixed.py
 
 Then open: http://localhost:5001
 """
+
+import eventlet
+eventlet.monkey_patch()
 
 import os
 import json
@@ -20,7 +23,22 @@ from flask import Flask, render_template, request, jsonify, send_from_directory
 from flask_socketio import SocketIO, emit
 import speech_recognition as sr
 
+# ======================================
+# RUN MODE CONFIG (LOCAL or CLOUD)
+# ======================================
+
+RUN_MODE = os.getenv("RUN_MODE", "LOCAL")
+
+# Disable microphone loading in cloud environment
+if RUN_MODE == "CLOUD":
+    sr.Microphone = None
+
+os.environ["EVENTLET_NO_GREENDNS"] = "yes"
+
 # ==================== ISL ALPHABET LIBRARY (A-Z) ====================
+
+print("Loading ISL gesture database...")
+
 ISL_LIBRARY = {
     'a': {'name': 'A', 'fingers': {'thumb': 0, 'index': 1.5, 'middle': 1.5, 'ring': 1.5, 'pinky': 1.5}, 'rot': [0, 0, 0], 'desc': 'Fist with thumb out'},
     'b': {'name': 'B', 'fingers': {'thumb': 1.2, 'index': 0, 'middle': 0, 'ring': 0, 'pinky': 0}, 'rot': [0, 0, 0], 'desc': 'All fingers straight up'},
@@ -50,16 +68,30 @@ ISL_LIBRARY = {
     'z': {'name': 'Z', 'fingers': {'thumb': 1.5, 'index': 0, 'middle': 1.5, 'ring': 1.5, 'pinky': 1.5}, 'rot': [0, 0, 0], 'desc': 'Index draws Z'}
 }
 
+print(f"Loaded {len(ISL_LIBRARY)} gestures")
+
 # ==================== Flask Setup ====================
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'isl-fingerspelling-2024'
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
+socketio = SocketIO(
+    app,
+    cors_allowed_origins="*",
+    async_mode="eventlet",
+    ping_timeout=60,
+    ping_interval=25
+)
+
+print("=" * 60)
+print("ISL SPEECH TO SIGN AVATAR SYSTEM")
+print("RUN MODE:", RUN_MODE)
+print("=" * 60)
 
 # Speech recognizer
 recognizer = sr.Recognizer()
-recognizer.energy_threshold = 4000
+recognizer.energy_threshold = 3000
 recognizer.dynamic_energy_threshold = True
 recognizer.pause_threshold = 0.8
+recognizer.non_speaking_duration = 0.5
 
 # System statistics
 stats = {
@@ -73,15 +105,13 @@ stats = {
 # ==================== Text to Letter Sequence ====================
 def text_to_letter_sequence(text):
     """Convert text to letter-by-letter fingerspelling sequence"""
-    # Clean text - remove punctuation, keep only letters and spaces
     clean_text = text.lower().replace(",", "").replace(".", "").replace("!", "").replace("?", "").replace("-", " ")
     chars = list(clean_text)
-    
+
     sequence = []
-    
+
     for i, char in enumerate(chars):
         if char == ' ':
-            # Add word space
             sequence.append({
                 'name': 'SPACE',
                 'desc': 'Word space - pause between words',
@@ -105,19 +135,16 @@ def text_to_letter_sequence(text):
                 ]
             })
             continue
-        
-        # Check if letter exists in library
+
         if char in ISL_LIBRARY:
             letter_data = ISL_LIBRARY[char]
-            
-            # Convert rotation from degrees to radians for frontend
             rot_rad = [r * 3.14159 / 180 for r in letter_data['rot']]
-            
+
             sequence.append({
                 'name': letter_data['name'],
                 'letter': char,
                 'desc': letter_data['desc'],
-                'duration': 1.0,
+                'duration': 0.7,
                 'keyframes': [
                     {
                         'time': 0,
@@ -134,7 +161,7 @@ def text_to_letter_sequence(text):
                         'fingers': letter_data['fingers']
                     },
                     {
-                        'time': 1.0,
+                        'time': 0.7,
                         'hand': 'right',
                         'pos': [0, 0.15, 0],
                         'rot': rot_rad,
@@ -142,14 +169,27 @@ def text_to_letter_sequence(text):
                     }
                 ]
             })
-    
+
     return sequence
 
 # ==================== Routes ====================
 @app.route('/')
 def index():
     """Serve main interface"""
-    return send_from_directory('templates', 'avatar_interface.html')
+    try:
+        return send_from_directory(os.path.join(os.getcwd(), 'templates'), 'avatar_interface.html')
+    except Exception:
+        return "Avatar UI Loaded. Frontend missing."
+
+@app.route('/health')
+def health():
+    """Health check endpoint for cloud platforms"""
+    return jsonify({"status": "running"})
+
+@app.route('/static/<path:filename>')
+def serve_static(filename):
+    """Serve static files for cloud platforms"""
+    return send_from_directory('static', filename)
 
 @app.route('/api/text-to-signs', methods=['POST'])
 def text_to_signs_api():
@@ -157,26 +197,24 @@ def text_to_signs_api():
     try:
         data = request.json
         text = data.get('text', '')
-        
+
         if not text:
             return jsonify({"success": False, "error": "No text provided"}), 400
-        
+
         print(f'📝 Converting text: "{text}"')
-        
-        # Convert to letter sequence
+
         sequence = text_to_letter_sequence(text)
-        
-        # Update stats
+
         stats["total_conversions"] += 1
         stats["total_gestures"] += len(sequence)
-        
+
         return jsonify({
             "success": True,
             "text": text,
             "sequence": sequence,
             "stats": get_stats()
         })
-        
+
     except Exception as e:
         stats["errors"] += 1
         print(f"❌ Error: {e}")
@@ -190,7 +228,7 @@ def get_stats_api():
 def get_stats():
     """Calculate current statistics"""
     uptime = (datetime.now() - stats["start_time"]).total_seconds()
-    
+
     return {
         "total_conversions": stats["total_conversions"],
         "total_gestures": stats["total_gestures"],
@@ -215,100 +253,91 @@ def handle_disconnect():
 @socketio.on('record_speech')
 def handle_record_speech():
     """Record speech and convert to fingerspelling"""
+
+    # Disable microphone in cloud environment
+    if RUN_MODE == "CLOUD":
+        emit("error", {"message": "Microphone recording not supported in cloud deployment"})
+        return
+
     def record_and_convert():
         try:
             print('🎤 Starting speech recognition...')
-            
+
             with sr.Microphone() as source:
                 print('🎤 Listening... Speak now!')
                 socketio.emit('recording_status', {'status': 'listening'})
-                
-                # Adjust for ambient noise
+
                 recognizer.adjust_for_ambient_noise(source, duration=0.5)
-                
-                # Listen for speech (5 second timeout, 10 second phrase limit)
                 audio = recognizer.listen(source, timeout=5, phrase_time_limit=10)
-                
+
                 print('🔄 Processing speech...')
                 socketio.emit('recording_status', {'status': 'processing'})
-                
+
                 try:
-                    # Try English recognition
                     text = recognizer.recognize_google(audio, language='en-IN')
                     print(f'✅ Recognized: "{text}"')
-                    
-                    # Update stats
+
                     stats["speech_recognitions"] += 1
                     stats["total_conversions"] += 1
-                    
-                    # Convert to letter sequence
+
                     sequence = text_to_letter_sequence(text)
                     stats["total_gestures"] += len(sequence)
-                    
-                    # Send to frontend
+
                     socketio.emit('play_signs', {
                         'text': text,
                         'sequence': sequence,
                         'stats': get_stats()
                     })
-                    
+
                 except sr.UnknownValueError:
                     print('❌ Could not understand speech')
                     stats["errors"] += 1
                     socketio.emit('error', {
                         'message': 'Could not understand speech. Please speak clearly and try again.'
                     })
-                    
+
                 except sr.RequestError as e:
                     print(f'❌ Speech recognition API error: {e}')
                     stats["errors"] += 1
                     socketio.emit('error', {
                         'message': 'Speech recognition service error. Please check your internet connection.'
                     })
-                    
+
         except sr.WaitTimeoutError:
             print('⏱️ No speech detected (timeout)')
             stats["errors"] += 1
             socketio.emit('error', {
                 'message': 'No speech detected. Please try again.'
             })
-            
+
         except Exception as e:
             print(f'❌ Recording error: {e}')
             stats["errors"] += 1
             socketio.emit('error', {
                 'message': f'Recording error: {str(e)}'
             })
-    
-    # Run in separate thread to avoid blocking
+
     threading.Thread(target=record_and_convert, daemon=True).start()
 
 # ==================== Main ====================
 if __name__ == '__main__':
-    print("\n" + "="*70)
-    print("🤟 ISL FINGERSPELLING SYSTEM - A-Z LETTER-BY-LETTER")
-    print("="*70)
-    print()
-    print("✨ Features:")
-    print(f"   • {len(ISL_LIBRARY)} Letter Signs (A-Z)")
-    print("   • Speech-to-Text Recognition")
-    print("   • Automatic Fingerspelling")
-    print("   • 3D Hand Animation")
-    print("   • Real-time Conversion")
-    print()
-    print("🌐 Interface: http://localhost:5001")
-    print("📊 Stats API: http://localhost:5001/api/stats")
-    print()
-    print("🎤 Usage:")
-    print("   1. Type text in the box and click 'Convert to Signs'")
-    print("   2. OR click 'Record Speech' and speak")
-    print("   3. Watch the 3D hand fingerspell your text!")
-    print()
-    print("="*70)
-    print()
-    
-    # Create templates folder if it doesn't exist
+
+    print("\n" + "="*60)
+    print("ISL SPEECH TO SIGN AVATAR SYSTEM STARTING")
+    print("RUN MODE:", RUN_MODE)
+    print("="*60)
+
     os.makedirs('templates', exist_ok=True)
-    
-    # Run server
-    socketio.run(app, host='0.0.0.0', port=5001, debug=False, allow_unsafe_werkzeug=True)
+
+    PORT = int(os.environ.get("PORT", 5001))
+
+    print("Server starting on port:", PORT)
+    print("Health check endpoint: /health")
+
+    socketio.run(
+        app,
+        host="0.0.0.0",
+        port=PORT,
+        debug=False,
+        use_reloader=False
+    )

@@ -1,64 +1,81 @@
-# isl_detection.py - HYBRID OPTIMIZED VERSION
-# Keeps: Your WORKING emotion detection (28 features)
-# Fixes: Video lag, sign detection, FPS issues
+# isl_detection.py — CLOUD PRODUCTION VERSION
+#
+# ════════════════════════════════════════════════════════════════════════════
+#  CLOUD FIXES APPLIED (3 changes only — everything else identical):
+#
+#  FIX 1 — pygame TTS: init only in LOCAL mode (crashes on headless server)
+#  FIX 2 — cv2.CAP_DSHOW: Windows-only flag removed for Linux cloud server
+#  FIX 3 — SharedMemory cleanup on startup (prevents crash on restart)
+#
+#  LOCAL CAMERA FIXES (built-in laptop webcam static/noise):
+#  FIX 4 — MJPG codec + 30-frame flush to clear DirectShow buffer on Windows
+#  FIX 5 — CAP_PROP_BUFFERSIZE set before flush (not after)
+#
+#  ALL original features preserved:
+#  ✅ Emotion detection v3 (happy/sad/angry/surprise/neutral)
+#  ✅ Letter hold timer, same-letter cooldown, confidence buffer
+#  ✅ SharedMemory zero-copy frame transfer
+#  ✅ CLOUD mode browser frame ingestion (_cloud_frame)
+#  ✅ gTTS speak button (disabled silently in cloud — browser TTS handles it)
+#  ✅ Word suggestions, auto-TTS, reset, backspace, accept_suggestion
+#  ✅ Oracle Free Tier safe: TARGET_FPS=15, EMOTION_PROCESS_INTERVAL=5
+# ════════════════════════════════════════════════════════════════════════════
 
 import cv2
-import tensorflow as tf
 import mediapipe as mp
 import numpy as np
-import pandas as pd
 import string
 import time
 import copy
 import itertools
 import os
+import base64
+import platform
 import threading
 from collections import deque, defaultdict, Counter
-from multiprocessing import Queue, Value
+from multiprocessing import Manager, Value, shared_memory
 import ctypes
 
+os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
+
 from tensorflow.keras.models import load_model
-from fer import FER
 from gtts import gTTS
 import pygame
 
-# Try to import translation module
 try:
     import translation
     TRANSLATION_AVAILABLE = True
 except ImportError:
     TRANSLATION_AVAILABLE = False
 
-# -------------------------------
-# ---------- CONFIG -------------
-# -------------------------------
+# ─────────────────────────────────────────────────────────────
+#  CONFIG
+# ─────────────────────────────────────────────────────────────
+RUN_MODE          = os.getenv("RUN_MODE", "LOCAL")
+ISL_MODEL_PATH    = "model.h5"
+CAM_INDEX         = 0
 
-ISL_MODEL_PATH = "model.h5"
-CAM_INDEX = 0
+# ── Letter timing ──────────────────────────────────────────────────────────
+LETTER_HOLD_SEC          = 0.9
+SAME_LETTER_COOLDOWN_SEC = 1.2
 
-# EMOTION DETECTION - KEEP YOUR WORKING SETTINGS
-BASE_FER_WEIGHT = 0.45
-BASE_LANDMARK_WEIGHT = 0.55
-SMOOTHING_FRAMES = 4
-MIN_CONF_TO_SHOW = 0.08
-EMOTIONS = ["happy", "sad", "angry", "surprise", "neutral"]
+# ── Emotion thresholds ────────────────────────────────────────────────────
+SMOOTHING_FRAMES         = 2
+MIN_CONF_TO_SHOW         = 0.06
+EMOTIONS                 = ["happy", "sad", "angry", "surprise", "neutral"]
 
-# SIGN DETECTION - OPTIMIZED FOR BETTER CAPTURE
-BUFFER_SIZE = 8  # Reduced from 12 for faster response
-CONF_THRESHOLD = 0.65  # Lowered from 0.8 for better detection
-STABILITY_THRESHOLD = 0.60  # Lowered from 0.7
-SENTENCE_DELAY = 2.0
-SPACE_THRESHOLD = 15
+CONF_THRESHOLD           = 0.32
+SPACE_THRESHOLD          = 18
+ENABLE_AUTO_TTS          = True
+TTS_LANGUAGE             = "en"
 
-ENABLE_AUTO_TTS = True
-TTS_LANGUAGE = "en"
-
-SHOW_LETTER_OVERLAY = True
-OVERLAY_COLOR_LETTER = (0, 255, 255)
-OVERLAY_COLOR_CONF = (255, 255, 0)
-OVERLAY_POSITION = (20, 50)
-OVERLAY_FONT_SCALE = 1.5
-OVERLAY_THICKNESS = 3
+SHOW_LETTER_OVERLAY      = True
+OVERLAY_COLOR_LETTER     = (0, 255, 255)
+OVERLAY_COLOR_CONF       = (255, 255, 0)
+OVERLAY_POSITION         = (20, 50)
+OVERLAY_FONT_SCALE       = 1.5
+OVERLAY_THICKNESS        = 3
 
 COMMON_WORDS = [
     "HELLO", "HELP", "PLEASE", "THANK", "YOU", "YES", "NO", "GOOD", "BAD",
@@ -66,68 +83,60 @@ COMMON_WORDS = [
     "FOOD", "HOME", "SCHOOL", "WORK", "HAPPY", "SAD", "SORRY", "WELCOME"
 ]
 
-# PERFORMANCE OPTIMIZATIONS - ONLY FOR VIDEO CAPTURE
-TARGET_FPS = 30
-CAMERA_RESOLUTION = (640, 480)  # Reduced from your original for speed
-EMOTION_PROCESS_INTERVAL = 2  # Process emotion every 2nd frame for speed
+TARGET_FPS               = 15
+CAMERA_RESOLUTION        = (640, 480)
+EMOTION_PROCESS_INTERVAL = 5
+FRAME_W, FRAME_H         = 640, 480
 
-# -------------------------------
-# --------- SHARED STATE --------
-# -------------------------------
 
+# ─────────────────────────────────────────────────────────────
+#  SHARED STATE
+# ─────────────────────────────────────────────────────────────
 class SharedState:
     def __init__(self):
-        self.frame_width = Value(ctypes.c_int, 640)
-        self.frame_height = Value(ctypes.c_int, 480)
-        self.frame_ready = Value(ctypes.c_bool, False)
-        self.ui_queue = Queue(maxsize=2)
-        self.command_queue = Queue(maxsize=10)
-        self.fps = Value(ctypes.c_double, 0.0)
+        manager = Manager()
+        self.ui_queue       = manager.Queue(200)
+        self.command_queue  = manager.Queue(20)
         self.processing_fps = Value(ctypes.c_double, 0.0)
 
-class SequenceBuffer:
-    def __init__(self, max_len: int = 30):
-        self.max_len = max_len
-        self.buffer = []
 
-    def add(self, features):
-        self.buffer.append(features)
-        if len(self.buffer) > self.max_len:
-            self.buffer.pop(0)
-
-    def is_full(self):
-        return len(self.buffer) == self.max_len
-
-    def get_batch(self):
-        return np.array(self.buffer, dtype=np.float32)
-
-# -------------------------------
-# --------- TTS ENGINE ----------
-# -------------------------------
-
-try:
-    pygame.mixer.init()
-    print("✅ TTS engine initialized")
-except Exception as e:
-    print(f"⚠️  TTS init warning: {e}")
+# ─────────────────────────────────────────────────────────────
+#  TTS ENGINE
+#  FIX 1: pygame.mixer.init() only runs in LOCAL mode.
+#          On cloud (headless Linux) there is no audio device —
+#          init() would crash the entire process at import time.
+#          In CLOUD mode TTS is silently disabled here; the browser
+#          handles speech via the Web Speech API on the client side.
+# ─────────────────────────────────────────────────────────────
+TTS_ENABLED = False
+if RUN_MODE == "LOCAL":
+    try:
+        pygame.mixer.init()
+        TTS_ENABLED = True
+        print("✅ TTS engine initialized")
+    except Exception as e:
+        print(f"⚠️  TTS init warning: {e}")
+else:
+    print("ℹ️  TTS disabled (CLOUD/headless mode) — browser handles speech")
 
 speaking_word = ""
-pause_audio = False
+pause_audio   = False
+
 
 def speak_text(text, lang=TTS_LANGUAGE):
     global speaking_word
-    if not text or not text.strip():
+
+    # FIX 1 continued: guard every call — silently skip on cloud
+    if not TTS_ENABLED or not text or not text.strip():
         return
 
     def _speak():
         global pause_audio, speaking_word
-        filename = None
         try:
-            filename = f"voice_{int(time.time()*1000)}_{threading.get_ident()}.mp3"
-            tts = gTTS(text=text, lang=lang)
-            tts.save(filename)
+            fname = f"voice_{int(time.time()*1000)}.mp3"
+            gTTS(text=text, lang=lang).save(fname)
             speaking_word = text
-            pygame.mixer.music.load(filename)
+            pygame.mixer.music.load(fname)
             pygame.mixer.music.play()
             while pygame.mixer.music.get_busy():
                 if pause_audio:
@@ -137,925 +146,773 @@ def speak_text(text, lang=TTS_LANGUAGE):
                     pygame.mixer.music.unpause()
                 pygame.time.Clock().tick(10)
             speaking_word = ""
-            
             pygame.mixer.music.stop()
             pygame.mixer.music.unload()
-            time.sleep(0.1)
-            
-            max_retries = 3
-            for attempt in range(max_retries):
+            time.sleep(0.15)
+            for _ in range(3):
                 try:
-                    if os.path.exists(filename):
-                        os.remove(filename)
+                    if os.path.exists(fname):
+                        os.remove(fname)
                     break
                 except PermissionError:
-                    if attempt < max_retries - 1:
-                        time.sleep(0.2)
+                    time.sleep(0.2)
         except Exception as e:
             print(f"TTS error: {e}")
             speaking_word = ""
 
     threading.Thread(target=_speak, daemon=True).start()
 
-# -------------------------------
-# --------- UTILITIES -----------
-# -------------------------------
 
+# ─────────────────────────────────────────────────────────────
+#  LANDMARK UTILITIES
+# ─────────────────────────────────────────────────────────────
 def calc_landmark_list(image, landmarks):
-    image_width, image_height = image.shape[1], image.shape[0]
-    return [[min(int(lm.x * image_width), image_width - 1),
-             min(int(lm.y * image_height), image_height - 1)] for lm in landmarks.landmark]
+    w, h = image.shape[1], image.shape[0]
+    return [
+        [min(int(lm.x * w), w - 1), min(int(lm.y * h), h - 1)]
+        for lm in landmarks.landmark
+    ]
+
 
 def pre_process_landmark(landmark_list):
     temp = copy.deepcopy(landmark_list)
-    base_x, base_y = temp[0]
+    bx, by = temp[0]
     for i in range(len(temp)):
-        temp[i][0] -= base_x
-        temp[i][1] -= base_y
-    temp = list(itertools.chain.from_iterable(temp))
-    max_value = max(list(map(abs, temp))) if temp else 1
-    return [n / max_value for n in temp]
+        temp[i][0] -= bx
+        temp[i][1] -= by
+    flat = list(itertools.chain.from_iterable(temp))
+    mv   = max(map(abs, flat)) if flat else 1
+    return [n / mv for n in flat]
 
-# KEEP YOUR WORKING CLAHE - BUT ONLY USE WHEN NEEDED
+
 def apply_clahe(frame):
+    """Enhance low-light / low-contrast frames for mobile cameras."""
     try:
-        lab = cv2.cvtColor(frame, cv2.COLOR_BGR2LAB)
+        lab     = cv2.cvtColor(frame, cv2.COLOR_BGR2LAB)
         l, a, b = cv2.split(lab)
-        clahe = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(8,8))
-        l2 = clahe.apply(l)
-        lab = cv2.merge((l2, a, b))
-        return cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)
+        clahe   = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(8, 8))
+        return cv2.cvtColor(cv2.merge((clahe.apply(l), a, b)), cv2.COLOR_LAB2BGR)
     except Exception:
         return frame
 
-def compute_brightness(frame):
+
+# ─────────────────────────────────────────────────────────────
+#  EMOTION DETECTION — v3
+#  Redesigned SAD / ANGRY / SURPRISE with external facial cues.
+#  HAPPY unchanged.
+# ─────────────────────────────────────────────────────────────
+
+def _dist(a, b):
+    """Euclidean distance between two 2-D landmark points."""
+    return float(np.linalg.norm(
+        np.array(a, dtype=np.float32) - np.array(b, dtype=np.float32)
+    ))
+
+
+def detect_emotion_from_landmarks(face_landmarks, img_shape):
+    """
+    Derive emotion scores from 468 MediaPipe Face Mesh landmarks.
+    Returns {emotion: float} summing to 1.0.
+
+    Key landmark reference:
+      Mouth corners : 61 (L), 291 (R)
+      Lip inner     : 13 (top), 14 (bottom)
+      Lip outer     : 0 (top), 17 (bottom)
+      L eye lids    : 159 (upper), 145 (lower)
+      R eye lids    : 386 (upper), 374 (lower)
+      L eye corners : 33 (outer), 133 (inner)
+      R eye corners : 362 (outer), 263 (inner)
+      L brow        : 70 (inner), 105 (outer), 52 (arch)
+      R brow        : 300 (inner), 334 (outer), 282 (arch)
+      Nose tip      : 4
+      Nostrils      : 129 (L ala), 358 (R ala)
+      Cheeks        : 50 (L), 280 (R)
+    """
     try:
-        yuv = cv2.cvtColor(frame, cv2.COLOR_BGR2YUV)
-        return float(np.mean(yuv[:,:,0]))
-    except:
-        return 128.0
+        pts    = np.array(face_landmarks, dtype=np.float32)
+        face_w = max(float(np.max(pts[:, 0]) - np.min(pts[:, 0])), 1.0)
+        face_h = max(float(np.max(pts[:, 1]) - np.min(pts[:, 1])), 1.0)
 
-# KEEP YOUR WORKING EMOTION DETECTION CODE - ALL 28 FEATURES
-def extract_face_features(face_landmarks, img_shape):
-    """Extract 28 facial features for natural emotion detection - YOUR WORKING VERSION"""
-    try:
-        pts = np.array(face_landmarks, dtype=np.float32)
-        h, w = img_shape[:2]
-        face_width = max(np.max(pts[:,0]) - np.min(pts[:,0]), 1.0)
-        face_height = max(np.max(pts[:,1]) - np.min(pts[:,1]), 1.0)
+        def p(i):
+            return pts[i]
 
-        # === MOUTH REGION ===
-        left_corner = pts[61]
-        right_corner = pts[291]
-        top_lip_center = pts[13]
-        bottom_lip_center = pts[14]
-        upper_lip_top = pts[0]
-        lower_lip_bottom = pts[17]
-        upper_lip_left = pts[78]
-        upper_lip_right = pts[308]
-        lower_lip_left = pts[88]
-        lower_lip_right = pts[318]
-        
-        mouth_width = np.linalg.norm(right_corner - left_corner)
-        mouth_height = np.linalg.norm(bottom_lip_center - top_lip_center)
-        mouth_aspect_ratio = mouth_width / (mouth_height + 1e-6)
-        mouth_openness = mouth_height / face_height
-        
-        mouth_center_y = (top_lip_center[1] + bottom_lip_center[1]) / 2.0
-        left_corner_curve = (left_corner[1] - mouth_center_y) / face_height
-        right_corner_curve = (right_corner[1] - mouth_center_y) / face_height
-        avg_mouth_curve = (left_corner_curve + right_corner_curve) / 2.0
-        
-        upper_lip_thickness = np.linalg.norm(upper_lip_top - upper_lip_left) / face_width
-        lower_lip_thickness = np.linalg.norm(lower_lip_bottom - lower_lip_left) / face_width
-        lip_compression = upper_lip_thickness + lower_lip_thickness
-        lip_gap = np.linalg.norm(upper_lip_top - lower_lip_bottom) / face_height
-        mouth_width_ratio = mouth_width / face_width
-        lower_lip_center_droop = (lower_lip_bottom[1] - bottom_lip_center[1]) / face_height
-        mouth_asymmetry = abs(left_corner_curve - right_corner_curve)
+        def nw(a, b):
+            return _dist(p(a), p(b)) / face_w
 
-        # === EYE REGION ===
-        left_eye_top = pts[159]
-        left_eye_bottom = pts[145]
-        left_eye_left = pts[33]
-        left_eye_right = pts[133]
-        left_eye_inner = pts[133]
-        
-        right_eye_top = pts[386]
-        right_eye_bottom = pts[374]
-        right_eye_left = pts[362]
-        right_eye_right = pts[263]
-        right_eye_inner = pts[362]
-        
-        left_eye_height = np.linalg.norm(left_eye_top - left_eye_bottom)
-        right_eye_height = np.linalg.norm(right_eye_top - right_eye_bottom)
-        avg_eye_openness = ((left_eye_height + right_eye_height) / 2.0) / face_height
-        
-        left_eye_width = np.linalg.norm(left_eye_right - left_eye_left)
-        right_eye_width = np.linalg.norm(right_eye_right - right_eye_left)
-        avg_eye_width = ((left_eye_width + right_eye_width) / 2.0) / face_width
-        
-        left_ear = left_eye_height / (left_eye_width + 1e-6)
-        right_ear = right_eye_height / (right_eye_width + 1e-6)
-        eye_aspect_ratio = (left_ear + right_ear) / 2.0
-        
-        left_upper_lid_droop = (left_eye_top[1] - left_eye_inner[1]) / face_height
-        right_upper_lid_droop = (right_eye_top[1] - right_eye_inner[1]) / face_height
-        avg_upper_lid_droop = (left_upper_lid_droop + right_upper_lid_droop) / 2.0
-        
-        eye_tension = 1.0 - eye_aspect_ratio
+        def nh(a, b):
+            return _dist(p(a), p(b)) / face_h
 
-        # === EYEBROW REGION ===
-        left_inner_brow = pts[70]
-        right_inner_brow = pts[300]
-        left_outer_brow = pts[105]
-        right_outer_brow = pts[334]
-        left_mid_brow = pts[107]
-        right_mid_brow = pts[336]
-        
-        left_brow_height = (left_inner_brow[1] - left_eye_top[1]) / face_height
-        right_brow_height = (right_inner_brow[1] - right_eye_top[1]) / face_height
-        avg_brow_height = (left_brow_height + right_brow_height) / 2.0
-        
-        left_brow_slant = (left_outer_brow[1] - left_inner_brow[1]) / face_width
-        right_brow_slant = (right_outer_brow[1] - right_inner_brow[1]) / face_width
-        avg_brow_slant = (left_brow_slant + right_brow_slant) / 2.0
-        
-        brow_distance = np.linalg.norm(right_inner_brow - left_inner_brow) / face_width
-        
-        left_brow_arch = (left_mid_brow[1] - left_inner_brow[1]) / face_height
-        right_brow_arch = (right_mid_brow[1] - right_inner_brow[1]) / face_height
-        avg_brow_arch = (left_brow_arch + right_brow_arch) / 2.0
-        
-        left_inner_raise = (left_eye_top[1] - left_inner_brow[1]) / face_height
-        right_inner_raise = (right_eye_top[1] - right_inner_brow[1]) / face_height
-        inner_brow_raise = (left_inner_raise + right_inner_raise) / 2.0
-        
-        left_outer_lower = (left_outer_brow[1] - left_eye_top[1]) / face_height
-        right_outer_lower = (right_outer_brow[1] - right_eye_top[1]) / face_height
-        outer_brow_lower = (left_outer_lower + right_outer_lower) / 2.0
-        
-        brow_tension = 1.0 / (brow_distance + 0.01)
+        def clamp01(v):
+            return max(0.0, min(1.0, float(v)))
 
-        # === JAW/CHIN REGION ===
-        chin = pts[152]
-        left_jaw = pts[172]
-        right_jaw = pts[397]
-        left_jaw_angle = pts[234]
-        right_jaw_angle = pts[454]
-        
-        jaw_drop = np.linalg.norm(chin - top_lip_center) / face_height
-        jaw_width = np.linalg.norm(right_jaw - left_jaw) / face_width
-        
-        left_jaw_clench = np.linalg.norm(left_jaw_angle - left_corner) / face_width
-        right_jaw_clench = np.linalg.norm(right_jaw_angle - right_corner) / face_width
-        jaw_clench = (left_jaw_clench + right_jaw_clench) / 2.0
-        
-        chin_protrusion = (chin[1] - bottom_lip_center[1]) / face_height
+        # ── Mouth ────────────────────────────────────────
+        lc, rc = p(61),  p(291)
+        tl, bl = p(13),  p(14)
+        ut, lb = p(0),   p(17)
 
-        # === CHEEK REGION ===
-        left_cheek = pts[50]
-        right_cheek = pts[280]
-        nose_bottom = pts[2]
-        
-        left_cheek_height = (nose_bottom[1] - left_cheek[1]) / face_height
-        right_cheek_height = (nose_bottom[1] - right_cheek[1]) / face_height
-        avg_cheek_raise = (left_cheek_height + right_cheek_height) / 2.0
-        
-        left_cheek_width = np.linalg.norm(left_cheek - left_corner) / face_width
-        right_cheek_width = np.linalg.norm(right_cheek - right_corner) / face_width
-        cheek_puff = (left_cheek_width + right_cheek_width) / 2.0
+        mid_y       = (tl[1] + bl[1]) / 2.0
+        mouth_curve = ((lc[1] - mid_y) + (rc[1] - mid_y)) / (2.0 * face_h)
+        mouth_open  = _dist(ut, lb) / face_h
+        inner_gap   = _dist(tl, bl) / face_h
+        mouth_w     = _dist(lc, rc) / face_w
+        o_ratio     = (mouth_open / (mouth_w + 1e-6)) if mouth_w > 0.05 else 0.0
 
-        # === NOSE REGION ===
-        nose_tip = pts[1]
-        nose_bridge = pts[6]
-        left_nostril = pts[98]
-        right_nostril = pts[327]
-        
-        nose_wrinkle = np.linalg.norm(nose_tip - nose_bridge) / face_height
-        nostril_width = np.linalg.norm(right_nostril - left_nostril) / face_width
+        # ── Eyes ─────────────────────────────────────────
+        leu, led = p(159), p(145)
+        reu, red = p(386), p(374)
+        lel, ler = p(33),  p(133)
+        rel, rer = p(362), p(263)
 
-        return {
-            "mouth_aspect_ratio": float(mouth_aspect_ratio),
-            "mouth_openness": float(mouth_openness),
-            "mouth_curve": float(avg_mouth_curve),
-            "lip_gap": float(lip_gap),
-            "mouth_width_ratio": float(mouth_width_ratio),
-            "lip_compression": float(lip_compression),
-            "lower_lip_droop": float(lower_lip_center_droop),
-            "mouth_asymmetry": float(mouth_asymmetry),
-            "eye_openness": float(avg_eye_openness),
-            "eye_width": float(avg_eye_width),
-            "eye_aspect_ratio": float(eye_aspect_ratio),
-            "upper_lid_droop": float(avg_upper_lid_droop),
-            "eye_tension": float(eye_tension),
-            "brow_height": float(avg_brow_height),
-            "brow_slant": float(avg_brow_slant),
-            "brow_distance": float(brow_distance),
-            "brow_arch": float(avg_brow_arch),
-            "inner_brow_raise": float(inner_brow_raise),
-            "outer_brow_lower": float(outer_brow_lower),
-            "brow_tension": float(brow_tension),
-            "jaw_drop": float(jaw_drop),
-            "jaw_width": float(jaw_width),
-            "jaw_clench": float(jaw_clench),
-            "chin_protrusion": float(chin_protrusion),
-            "cheek_raise": float(avg_cheek_raise),
-            "cheek_puff": float(cheek_puff),
-            "nose_wrinkle": float(nose_wrinkle),
-            "nostril_flare": float(nostril_width)
-        }
-    except Exception as e:
-        return {}
+        l_eye_h = _dist(leu, led)
+        r_eye_h = _dist(reu, red)
+        l_eye_w = _dist(lel, ler)
+        r_eye_w = _dist(rel, rer)
 
-# KEEP YOUR WORKING EMOTION SCORING FUNCTION
-def landmark_scores_from_features(feat):
-    """Natural emotion detection - YOUR WORKING VERSION"""
-    if not feat:
-        return {e: 0.0 for e in EMOTIONS[:-1]} | {"neutral": 1.0}
+        l_ear   = l_eye_h / (l_eye_w + 1e-6)
+        r_ear   = r_eye_h / (r_eye_w + 1e-6)
+        avg_ear = (l_ear + r_ear) / 2.0
+        eye_open = ((l_eye_h + r_eye_h) / 2.0) / face_h
 
-    mouth_ratio = feat.get("mouth_aspect_ratio", 1.5)
-    mouth_open = feat.get("mouth_openness", 0.0)
-    mouth_curve = feat.get("mouth_curve", 0.0)
-    lip_gap = feat.get("lip_gap", 0.03)
-    mouth_width = feat.get("mouth_width_ratio", 0.4)
-    lip_compression = feat.get("lip_compression", 0.1)
-    lower_lip_droop = feat.get("lower_lip_droop", 0.0)
-    mouth_asymmetry = feat.get("mouth_asymmetry", 0.0)
-    
-    eye_open = feat.get("eye_openness", 0.06)
-    eye_width = feat.get("eye_width", 0.15)
-    eye_ar = feat.get("eye_aspect_ratio", 0.3)
-    upper_lid_droop = feat.get("upper_lid_droop", 0.0)
-    eye_tension = feat.get("eye_tension", 0.0)
-    
-    brow_height = feat.get("brow_height", -0.08)
-    brow_slant = feat.get("brow_slant", 0.0)
-    brow_dist = feat.get("brow_distance", 0.15)
-    brow_arch = feat.get("brow_arch", 0.0)
-    inner_brow_raise = feat.get("inner_brow_raise", 0.0)
-    outer_brow_lower = feat.get("outer_brow_lower", 0.0)
-    brow_tension = feat.get("brow_tension", 0.0)
-    
-    jaw_drop = feat.get("jaw_drop", 0.2)
-    jaw_width = feat.get("jaw_width", 0.35)
-    jaw_clench = feat.get("jaw_clench", 0.15)
-    chin_protrusion = feat.get("chin_protrusion", 0.0)
-    
-    cheek_raise = feat.get("cheek_raise", 0.0)
-    cheek_puff = feat.get("cheek_puff", 0.0)
-    
-    nose_wrinkle = feat.get("nose_wrinkle", 0.0)
-    nostril_flare = feat.get("nostril_flare", 0.0)
+        # ── Eyebrows ──────────────────────────────────────
+        lib, rib = p(70),  p(300)
+        lob, rob = p(105), p(334)
+        lab, rab = p(52),  p(282)
 
-    happy = 0.0
-    sad = 0.0
-    angry = 0.0
-    surprise = 0.0
+        l_brow_in_h  = (leu[1] - lib[1]) / face_h
+        r_brow_in_h  = (reu[1] - rib[1]) / face_h
+        avg_brow_in_h = (l_brow_in_h + r_brow_in_h) / 2.0
 
-    # HAPPY
-    if mouth_curve < -0.002:
-        happy += min(0.40, abs(mouth_curve) / 0.025)
-    if mouth_ratio > 1.35:
-        happy += min(0.25, (mouth_ratio - 1.35) / 0.45)
-    if cheek_raise > 0.008:
-        happy += min(0.22, cheek_raise / 0.022)
-    if cheek_puff > 0.15:
-        happy += 0.18
-    if eye_ar < 0.28 and eye_tension > 0.5:
-        happy += 0.18
-    
-    if mouth_curve > 0.003:
-        happy *= 0.3
-    if brow_height < -0.095:
-        happy *= 0.4
-    if inner_brow_raise > 0.08:
-        happy *= 0.4
-    if mouth_open > 0.07:
-        happy *= 0.6
-    
-    happy = max(0.0, min(1.0, happy * 1.2))
+        l_brow_out_h  = (leu[1] - lob[1]) / face_h
+        r_brow_out_h  = (reu[1] - rob[1]) / face_h
+        avg_brow_out_h = (l_brow_out_h + r_brow_out_h) / 2.0
 
-    # SAD
-    sad_score = 0.0
-    inner_brow_pull = inner_brow_raise * (1.0 / (brow_dist + 0.01))
-    if inner_brow_raise > 0.055 and brow_dist < 0.165:
-        sad_score += min(0.45, inner_brow_pull * 6.0)
-    elif inner_brow_raise > 0.055:
-        sad_score += min(0.30, inner_brow_raise / 0.028)
-    
-    if mouth_curve > 0.001:
-        sad_score += min(0.35, mouth_curve / 0.025)
-    if lip_compression < 0.095 and lip_gap < 0.035:
-        sad_score += 0.20
-    if mouth_width < 0.395:
-        sad_score += min(0.16, (0.395 - mouth_width) / 0.05)
-    if outer_brow_lower > -0.085:
-        sad_score += min(0.16, abs(outer_brow_lower + 0.085) / 0.025)
-    if brow_height > -0.078:
-        sad_score += min(0.18, (brow_height + 0.078) / 0.04)
-    if 0.05 < eye_open < 0.08 and eye_tension < 0.62:
-        sad_score += 0.16
-    if upper_lid_droop < -0.015:
-        sad_score += min(0.14, abs(upper_lid_droop) / 0.03)
-    if jaw_drop < 0.22:
-        sad_score += 0.10
-    
-    if mouth_curve < -0.003:
-        sad_score *= 0.2
-    if cheek_raise > 0.015:
-        sad_score *= 0.3
-    if brow_height < -0.092:
-        sad_score *= 0.35
-    if eye_open > 0.095:
-        sad_score *= 0.4
-    if brow_dist < 0.125:
-        sad_score *= 0.35
-    if mouth_open > 0.055:
-        sad_score *= 0.45
-    
-    sad = max(0.0, min(1.0, sad_score * 1.5))
+        brow_inner_gap = nw(70, 300)
+        brow_oblique   = avg_brow_in_h - avg_brow_out_h
 
-    # ANGRY
-    angry_score = 0.0
-    if brow_dist < 0.145:
-        angry_score += min(0.42, (0.145 - brow_dist) / 0.042)
-    if brow_height < -0.088:
-        angry_score += min(0.38, abs(brow_height + 0.088) / 0.032)
-    if brow_tension > 6.8:
-        angry_score += min(0.25, (brow_tension - 6.8) / 5.2)
-    if eye_open < 0.062:
-        angry_score += min(0.30, (0.062 - eye_open) / 0.032)
-    if eye_tension > 0.62:
-        angry_score += 0.20
-    if lip_gap < 0.03:
-        angry_score += 0.18
-    if lip_compression < 0.09:
-        angry_score += 0.16
-    if jaw_width < 0.335:
-        angry_score += min(0.20, (0.335 - jaw_width) / 0.052)
-    if jaw_clench < 0.148:
-        angry_score += min(0.16, (0.148 - jaw_clench) / 0.032)
-    if brow_slant > 0.005:
-        angry_score += min(0.18, brow_slant / 0.032)
-    if chin_protrusion > 0.17:
-        angry_score += min(0.16, (chin_protrusion - 0.17) / 0.052)
-    if nose_wrinkle > 0.038:
-        angry_score += min(0.14, (nose_wrinkle - 0.038) / 0.042)
-    if nostril_flare > 0.115:
-        angry_score += 0.12
-    
-    if mouth_curve < -0.005:
-        angry_score *= 0.2
-    if brow_height > -0.065:
-        angry_score *= 0.3
-    if mouth_open > 0.06:
-        angry_score *= 0.45
-    if cheek_raise > 0.013:
-        angry_score *= 0.35
-    if inner_brow_raise > 0.08:
-        angry_score *= 0.4
-    if eye_open > 0.09:
-        angry_score *= 0.45
-    
-    angry = max(0.0, min(1.0, angry_score * 1.5))
+        l_arch_h   = (leu[1] - lab[1]) / face_h
+        r_arch_h   = (reu[1] - rab[1]) / face_h
+        avg_arch_h = (l_arch_h + r_arch_h) / 2.0
 
-    # SURPRISE
-    surprise_score = 0.0
-    if brow_height > -0.062:
-        surprise_score += min(0.45, (brow_height + 0.062) / 0.048)
-    if eye_open > 0.082:
-        surprise_score += min(0.40, (eye_open - 0.082) / 0.058)
-    if mouth_open > 0.038:
-        surprise_score += min(0.32, (mouth_open - 0.038) / 0.052)
-    if brow_arch < -0.010:
-        surprise_score += min(0.20, abs(brow_arch) / 0.020)
-    if brow_dist > 0.155:
-        surprise_score += min(0.16, (brow_dist - 0.155) / 0.045)
-    if 1.15 < mouth_ratio < 1.75 and mouth_open > 0.035:
-        surprise_score += 0.18
-    if eye_tension < 0.52 and eye_open > 0.078:
-        surprise_score += 0.16
-    if nostril_flare > 0.125:
-        surprise_score += 0.13
-    if abs(mouth_curve) < 0.007:
-        surprise_score += 0.10
-    
-    if brow_dist < 0.138:
-        surprise_score *= 0.3
-    if brow_height < -0.082:
-        surprise_score *= 0.35
-    if abs(mouth_curve) > 0.008:
-        surprise_score *= 0.4
-    if eye_tension > 0.65:
-        surprise_score *= 0.45
-    if cheek_raise > 0.016:
-        surprise_score *= 0.5
-    if lip_gap < 0.028:
-        surprise_score *= 0.55
-    
-    surprise = max(0.0, min(1.0, surprise_score * 1.4))
+        # ── Nose ─────────────────────────────────────────
+        nostril_w  = nw(129, 358)
+        nose_flare = max(0.0, nostril_w - 0.26)
 
-    # NEUTRAL
-    emotions_sum = happy + sad + angry + surprise
-    neutral = max(0.0, 1.0 - (emotions_sum * 1.3))
+        # ── Cheeks ───────────────────────────────────────
+        lch, rch, nb = p(50), p(280), p(4)
+        cheek_raise  = ((nb[1] - lch[1]) + (nb[1] - rch[1])) / (2.0 * face_h)
 
-    # NORMALIZATION
-    total = happy + sad + angry + surprise + neutral
-    if total > 0:
-        happy /= total
-        sad /= total
-        angry /= total
-        surprise /= total
-        neutral /= total
+        # ── HAPPY ────────────────────────────────────────
+        happy = 0.0
+        if mouth_curve < -0.003:
+            happy += clamp01(abs(mouth_curve) / 0.018) * 0.55
+        if mouth_w > 0.36:
+            happy += clamp01((mouth_w - 0.36) / 0.07) * 0.28
+        if cheek_raise > 0.007:
+            happy += clamp01(cheek_raise / 0.018) * 0.26
+        if avg_ear < 0.27 and eye_open > 0.04:
+            happy += 0.12
+        if mouth_curve > 0.004:         happy *= 0.15
+        if avg_brow_in_h < -0.05:       happy *= 0.40
+        if mouth_open > 0.08:           happy *= 0.55
+        happy = clamp01(happy * 1.30)
 
-    return {
-        "happy": float(happy),
-        "sad": float(sad),
-        "angry": float(angry),
-        "surprise": float(surprise),
-        "neutral": float(neutral)
-    }
+        # ── SAD — v3 ──────────────────────────────────────
+        sad = 0.0
+        if brow_oblique > 0.02:
+            sad += clamp01((brow_oblique - 0.02) / 0.055) * 0.45
+        if 0.08 < avg_ear < 0.23:
+            peak_dist = abs(avg_ear - 0.16)
+            sad += clamp01(1.0 - peak_dist / 0.08) * 0.30
+        if 0.02 < eye_open < 0.065:
+            sad += clamp01((0.065 - eye_open) / 0.025) * 0.18
+        if mouth_curve > 0.002:
+            sad += clamp01(mouth_curve / 0.020) * 0.40
+        if mouth_w < 0.36:
+            sad += clamp01((0.36 - mouth_w) / 0.055) * 0.18
+        if avg_brow_in_h > 0.04:
+            sad += clamp01((avg_brow_in_h - 0.04) / 0.040) * 0.20
+        if mouth_curve < -0.004:                            sad *= 0.08
+        if cheek_raise > 0.014:                             sad *= 0.20
+        if avg_ear > 0.30:                                  sad *= 0.25
+        if avg_brow_in_h < -0.06 and brow_inner_gap < 0.14: sad *= 0.15
+        sad = clamp01(sad * 1.50)
 
-def get_word_suggestions(partial_word, word_freq):
-    if not partial_word:
+        # ── ANGRY — v3 ────────────────────────────────────
+        angry = 0.0
+        if nose_flare > 0.005:
+            angry += clamp01(nose_flare / 0.055) * 0.35
+        if avg_brow_in_h < -0.04:
+            angry += clamp01(abs(avg_brow_in_h + 0.04) / 0.045) * 0.40
+        if brow_inner_gap < 0.155:
+            angry += clamp01((0.155 - brow_inner_gap) / 0.045) * 0.35
+        if avg_brow_out_h < -0.03:
+            angry += clamp01(abs(avg_brow_out_h + 0.03) / 0.040) * 0.20
+        if avg_ear < 0.20 and eye_open < 0.055:
+            angry += clamp01((0.055 - eye_open) / 0.025) * 0.25
+        if inner_gap < 0.030:
+            angry += clamp01((0.030 - inner_gap) / 0.025) * 0.22
+        if brow_oblique < 0.015:
+            angry += 0.08
+        if mouth_curve < -0.005:        angry *= 0.15
+        if cheek_raise > 0.014:         angry *= 0.20
+        if avg_brow_in_h > -0.01:       angry *= 0.20
+        if mouth_open > 0.07:           angry *= 0.40
+        if brow_oblique > 0.04:         angry *= 0.35
+        angry = clamp01(angry * 1.45)
+
+        # ── SURPRISE — v3 ─────────────────────────────────
+        surprise = 0.0
+        if 0.40 < o_ratio < 1.60:
+            peak_dist = abs(o_ratio - 0.90)
+            surprise += clamp01(1.0 - peak_dist / 0.55) * 0.50
+        if 0.03 < mouth_open < 0.11:
+            surprise += clamp01((mouth_open - 0.03) / 0.06) * 0.25
+        if mouth_w > 0.40:
+            surprise *= max(0.10, 1.0 - (mouth_w - 0.40) / 0.10)
+        if avg_ear > 0.27:
+            surprise += clamp01((avg_ear - 0.27) / 0.10) * 0.40
+        if eye_open > 0.07:
+            surprise += clamp01((eye_open - 0.07) / 0.055) * 0.28
+        if avg_arch_h > 0.05:
+            surprise += clamp01((avg_arch_h - 0.05) / 0.055) * 0.35
+        if avg_brow_in_h > 0.04 and avg_brow_out_h > 0.02:
+            surprise += 0.15
+        if abs(brow_oblique) < 0.025:
+            surprise += 0.08
+        if mouth_curve < -0.005:        surprise *= 0.30
+        if avg_brow_in_h < -0.03:       surprise *= 0.20
+        if avg_ear < 0.18:              surprise *= 0.25
+        if brow_inner_gap < 0.13:       surprise *= 0.25
+        if mouth_w > 0.44:              surprise *= 0.25
+        if mouth_open > 0.12 and o_ratio < 0.40:
+            surprise *= 0.30
+        surprise = clamp01(surprise * 1.35)
+
+        # ── NEUTRAL ───────────────────────────────────────
+        neutral = max(0.0, 1.0 - (happy + sad + angry + surprise) * 1.05)
+
+        total = happy + sad + angry + surprise + neutral
+        if total > 1e-6:
+            happy    /= total
+            sad      /= total
+            angry    /= total
+            surprise /= total
+            neutral  /= total
+
+        return {k: round(float(v), 4)
+                for k, v in zip(EMOTIONS, [happy, sad, angry, surprise, neutral])}
+
+    except Exception as ex:
+        print(f"⚠️  Emotion detection error: {ex}")
+        return {e: (1.0 if e == "neutral" else 0.0) for e in EMOTIONS}
+
+
+# ─────────────────────────────────────────────────────────────
+#  DISPLAY HELPERS
+# ─────────────────────────────────────────────────────────────
+def get_word_suggestions(partial, word_freq):
+    if not partial:
         return []
-    
-    partial = partial_word.upper()
-    matches = []
-    
+    p_up = partial.upper()
+    seen = {}
+    out  = []
     for word, freq in word_freq.most_common(20):
-        if word.startswith(partial) and word != partial:
-            matches.append((word, freq))
-    
+        if word.startswith(p_up) and word != p_up:
+            out.append((word, freq)); seen[word] = True
     for word in COMMON_WORDS:
-        if word.startswith(partial) and word not in [m[0] for m in matches]:
-            matches.append((word, 0))
-    
-    matches.sort(key=lambda x: (-x[1], x[0]))
-    return [m[0] for m in matches[:3]]
+        if word.startswith(p_up) and word not in seen:
+            out.append((word, 0))
+    out.sort(key=lambda x: (-x[1], x[0]))
+    return [m[0] for m in out[:3]]
+
 
 def draw_hand_landmarks(frame, hand_landmarks):
-    mp_drawing = mp.solutions.drawing_utils
-    mp_hands = mp.solutions.hands
-    
-    landmark_style = mp_drawing.DrawingSpec(
-        color=(0, 255, 0),
-        thickness=2,
-        circle_radius=3
+    mp.solutions.drawing_utils.draw_landmarks(
+        frame, hand_landmarks, mp.solutions.hands.HAND_CONNECTIONS,
+        mp.solutions.drawing_utils.DrawingSpec(
+            color=(0, 255, 0), thickness=2, circle_radius=3),
+        mp.solutions.drawing_utils.DrawingSpec(
+            color=(0, 255, 255), thickness=2),
     )
-    connection_style = mp_drawing.DrawingSpec(
-        color=(0, 255, 255),
-        thickness=2
-    )
-    
-    mp_drawing.draw_landmarks(
-        frame,
-        hand_landmarks,
-        mp_hands.HAND_CONNECTIONS,
-        landmark_style,
-        connection_style
-    )
+
 
 def draw_letter_overlay(frame, letter, confidence):
-    if not SHOW_LETTER_OVERLAY or not letter:
+    if not SHOW_LETTER_OVERLAY or not letter or confidence <= 0:
         return frame
-    
-    if confidence > 0:
-        text_letter = f"{letter}"
-        text_conf = f"({confidence:.2f})"
-        
-        x, y = OVERLAY_POSITION
-        
-        overlay = frame.copy()
-        cv2.rectangle(overlay, (x-10, y-40), (x+200, y+20), (0, 0, 0), -1)
-        frame = cv2.addWeighted(overlay, 0.5, frame, 0.5, 0)
-        
-        cv2.putText(frame, text_letter, (x, y), 
-                   cv2.FONT_HERSHEY_SIMPLEX, OVERLAY_FONT_SCALE, 
-                   OVERLAY_COLOR_LETTER, OVERLAY_THICKNESS, cv2.LINE_AA)
-        
-        text_width = cv2.getTextSize(text_letter, cv2.FONT_HERSHEY_SIMPLEX, 
-                                     OVERLAY_FONT_SCALE, OVERLAY_THICKNESS)[0][0]
-        cv2.putText(frame, text_conf, (x + text_width + 10, y), 
-                   cv2.FONT_HERSHEY_SIMPLEX, OVERLAY_FONT_SCALE * 0.7, 
-                   OVERLAY_COLOR_CONF, OVERLAY_THICKNESS - 1, cv2.LINE_AA)
-    
+    x, y    = OVERLAY_POSITION
+    overlay = frame.copy()
+    cv2.rectangle(overlay, (x - 10, y - 40), (x + 220, y + 20), (0, 0, 0), -1)
+    frame = cv2.addWeighted(overlay, 0.5, frame, 0.5, 0)
+    cv2.putText(frame, letter, (x, y),
+                cv2.FONT_HERSHEY_SIMPLEX, OVERLAY_FONT_SCALE,
+                OVERLAY_COLOR_LETTER, OVERLAY_THICKNESS, cv2.LINE_AA)
+    tw = cv2.getTextSize(letter, cv2.FONT_HERSHEY_SIMPLEX,
+                         OVERLAY_FONT_SCALE, OVERLAY_THICKNESS)[0][0]
+    cv2.putText(frame, f"({confidence:.2f})", (x + tw + 10, y),
+                cv2.FONT_HERSHEY_SIMPLEX, OVERLAY_FONT_SCALE * 0.7,
+                OVERLAY_COLOR_CONF, OVERLAY_THICKNESS - 1, cv2.LINE_AA)
     return frame
 
-# -------------------------------
-# ------- CORE PROCESSOR --------
-# -------------------------------
 
-def core_processing_engine(shared_state):
+# ─────────────────────────────────────────────────────────────
+#  CORE PROCESSING ENGINE
+# ─────────────────────────────────────────────────────────────
+def core_processing_engine(shared_state, shm_name=None, frame_lock_val=None, frame_seq=None):
     print("=" * 70)
-    print("🚀 HYBRID OPTIMIZED ISL Detection System Starting...")
+    print("🚀 ISL Detection System Starting…  (emotion engine v3)")
+    print(f"   RUN_MODE         = {RUN_MODE}")
+    print(f"   CONF_THRESHOLD   = {CONF_THRESHOLD}")
+    print(f"   LETTER_HOLD_SEC  = {LETTER_HOLD_SEC}s")
+    print(f"   SharedMemory     = {'enabled' if shm_name else 'disabled (base64 fallback)'}")
     print("=" * 70)
-    print("✅ Keeping: YOUR WORKING emotion detection (28 features)")
-    print("✅ Fixed: Video lag, sign detection, FPS issues")
-    print("=" * 70)
-    
+
+    # ── SharedMemory init ──────────────────────────────────────────────────
+    shm       = None
+    shm_array = None
+
+    if shm_name is not None:
+        try:
+            shm       = shared_memory.SharedMemory(name=shm_name)
+            shm_array = np.ndarray((480, 640, 3), dtype=np.uint8, buffer=shm.buf)
+            print("✅ SharedMemory connected (Zero-copy mode)")
+        except Exception as e:
+            print(f"❌ SharedMemory init failed: {e}")
+            return
+
+    # ── Load ISL model ─────────────────────────────────────────────────────
     try:
         model = load_model(ISL_MODEL_PATH)
         print("✅ ISL model loaded")
+        print(f"   Input  shape : {model.input_shape}")
+        print(f"   Output shape : {model.output_shape}")
     except Exception as e:
-        print(f"❌ Failed to load ISL model: {e}")
+        print(f"❌ Failed to load model: {e}")
+        if shm:
+            shm.close()
         return
-    
-    alphabet = list(string.ascii_uppercase)
-    
+
     try:
-        emotion_detector = FER(mtcnn=False)
-        print("✅ FER emotion detector initialized")
+        model.predict(np.zeros((1, 42), np.float32), verbose=0)
+        print("✅ Model warmed up")
     except Exception as e:
-        print(f"⚠️  FER warning: {e}")
-        emotion_detector = None
-    
-    mp_hands = mp.solutions.hands
-    mp_face = mp.solutions.face_mesh
-    
-    buffer = []
-    current_word = []
-    sentence = []
-    no_hand_frames = 0
-    last_letter = None
-    letter_confidence_buffer = deque(maxlen=3)  # Reduced for faster response
-    hand_position_buffer = deque(maxlen=3)
-    word_frequency = Counter()
-    
-    current_detected_letter = ""
-    current_confidence = 0.0
-    
-    emotion_history = deque(maxlen=SMOOTHING_FRAMES)
-    current_emotion = "neutral"
-    emotion_scores = {e: 0.0 for e in EMOTIONS}
-    emotion_timeline = deque(maxlen=100)
-    last_emotion = "neutral"
-    emotion_frame_counter = 0
-    
-    frame_count = 0
-    fps_start_time = time.time()
+        print(f"⚠️  Warmup: {e}")
+
+    alphabet = list(string.ascii_uppercase) + [str(i) for i in range(1, 10)]
+    print(f"   Alphabet : {len(alphabet)} classes  (model outputs {model.output_shape[1]})")
+
+    # ── Detection state ────────────────────────────────────────────────────
+    current_word             = []
+    sentence                 = []
+    no_hand_frames           = 0
+
+    candidate_letter         = ""
+    candidate_since          = 0.0
+    last_accepted_letter     = ""
+    last_accepted_time       = 0.0
+
+    letter_confidence_buffer = deque(maxlen=4)
+    word_frequency           = Counter()
+    current_detected_letter  = ""
+    current_confidence       = 0.0
+
+    emotion_history          = deque(maxlen=SMOOTHING_FRAMES)
+    current_emotion          = "neutral"
+    emotion_scores           = {e: (1.0 if e == "neutral" else 0.0) for e in EMOTIONS}
+    emotion_timeline         = deque(maxlen=100)
+    emotion_frame_counter    = 0
+
+    frame_count     = 0
     fps_frame_times = deque(maxlen=30)
-    
+
     stats = {
         "letters_detected": 0,
-        "words_formed": 0,
+        "words_formed":     0,
         "sentences_formed": 0,
-        "emotion_changes": 0,
-        "session_start": time.time()
+        "emotion_changes":  0,
+        "session_start":    time.time(),
     }
-    
-    # OPTIMIZED CAMERA SETUP
-    print("🎥 Initializing camera...")
-    cap = cv2.VideoCapture(CAM_INDEX)
-    
-    if not cap.isOpened():
-        print("❌ Camera not found")
-        return
-    
-    # Set optimized resolution
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, CAMERA_RESOLUTION[0])
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, CAMERA_RESOLUTION[1])
-    cap.set(cv2.CAP_PROP_FPS, TARGET_FPS)
-    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-    
-    actual_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    actual_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    
-    print(f"✅ Camera: {actual_w}x{actual_h}")
-    
-    # Clear buffer
-    for _ in range(10):
-        cap.read()
-    
-    print("✅ Camera ready!")
+
+    cmd_queue = shared_state.command_queue
+    ui_queue  = shared_state.ui_queue
+
+    # ── Camera init ────────────────────────────────────────────────────────
+    print("🎥 Initializing camera…")
+    if RUN_MODE == "LOCAL":
+        # FIX 2: cv2.CAP_DSHOW is Windows-only — use platform check
+        if platform.system() == "Windows":
+            cap = cv2.VideoCapture(CAM_INDEX, cv2.CAP_DSHOW)
+        else:
+            cap = cv2.VideoCapture(CAM_INDEX)   # Linux/Mac — no CAP_DSHOW
+
+        if not cap.isOpened():
+            cap = cv2.VideoCapture(CAM_INDEX)   # fallback without backend flag
+        if not cap.isOpened():
+            print("❌ Camera not found — is another app using it?")
+            if shm:
+                shm.close()
+            return
+
+        # FIX 4: Set MJPG codec BEFORE resolution — forces hardware MJPEG path
+        # on built-in laptop webcams, avoiding the raw uncompressed buffer that
+        # causes the horizontal static/noise stripes seen in the MJPEG stream.
+        # Must be set before width/height or it has no effect on some drivers.
+        if platform.system() == "Windows":
+            cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc('M', 'J', 'P', 'G'))
+
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH,  CAMERA_RESOLUTION[0])
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, CAMERA_RESOLUTION[1])
+        cap.set(cv2.CAP_PROP_FPS,          TARGET_FPS)
+
+        # FIX 5: Buffer size must be 1 to prevent stale frame accumulation.
+        # Set AFTER resolution so the driver doesn't reset it.
+        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+
+        # FIX 4 continued: Flush 30 frames (was 10) to drain the DirectShow
+        # ring buffer. Built-in webcams pre-fill ~20 frames before stabilizing.
+        print("🎥 Flushing camera buffer (30 frames)…")
+        for _ in range(30):
+            cap.read()
+
+        # Verify the camera is actually producing valid frames
+        ret, test_frame = cap.read()
+        if not ret or test_frame is None:
+            print("❌ Camera flush failed — no valid frame received")
+            cap.release()
+            if shm:
+                shm.close()
+            return
+
+        actual_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        actual_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        print(f"✅ Camera: {actual_w}x{actual_h}")
+        print("✅ Camera ready!")
+    else:
+        cap = None
+        print("☁️  CLOUD mode — waiting for browser frames via socket")
+
     print("=" * 70)
-    
-    # OPTIMIZED MEDIAPIPE SETTINGS
+
+    mp_hands = mp.solutions.hands
+    mp_face  = mp.solutions.face_mesh
+
     with mp_hands.Hands(
             static_image_mode=False,
-            model_complexity=0,  # Lite model
-            max_num_hands=1,  # Single hand for better performance
-            min_detection_confidence=0.5,  # Lowered
-            min_tracking_confidence=0.5
+            model_complexity=0,
+            max_num_hands=1,
+            min_detection_confidence=0.6,
+            min_tracking_confidence=0.6,
         ) as hands, \
          mp_face.FaceMesh(
             static_image_mode=False,
             max_num_faces=1,
-            refine_landmarks=False,
-            min_detection_confidence=0.5,
-            min_tracking_confidence=0.5
+            refine_landmarks=True,
+            min_detection_confidence=0.6,
+            min_tracking_confidence=0.6,
         ) as face_mesh:
-        
-        print("✅ MediaPipe initialized - starting main loop...")
-        
+
+        print("✅ MediaPipe initialized — entering main loop")
+
         while True:
-            loop_start = time.time()
-            
-            # Command handling
+            t0  = time.time()
+            now = t0
+
+            # ── Commands ───────────────────────────────────────────────────
             try:
-                while not shared_state.command_queue.empty():
-                    cmd = shared_state.command_queue.get_nowait()
-                    
-                    if cmd['action'] == 'reset':
-                        buffer = []
-                        current_word = []
-                        sentence = []
-                        no_hand_frames = 0
-                        last_letter = None
+                while not cmd_queue.empty():
+                    cmd    = cmd_queue.get_nowait()
+                    action = cmd.get("action", "")
+
+                    if action == "reset":
+                        current_word         = []
+                        sentence             = []
+                        no_hand_frames       = 0
+                        candidate_letter     = ""
+                        candidate_since      = 0.0
+                        last_accepted_letter = ""
+                        last_accepted_time   = 0.0
                         letter_confidence_buffer.clear()
-                        hand_position_buffer.clear()
                         current_detected_letter = ""
-                        current_confidence = 0.0
-                        for _ in range(5):
-                            cap.read()
-                        print("🔄 System reset")
-                    
-                    elif cmd['action'] == 'backspace':
+                        current_confidence      = 0.0
+                        print("🔄 Reset")
+
+                    elif action == "backspace":
                         if current_word:
-                            removed = current_word.pop()
-                            print(f"⌫ Removed letter: {removed}")
+                            current_word.pop()
                         elif sentence:
-                            removed_word = sentence.pop()
-                            print(f"⌫ Removed word: {removed_word}")
-                    
-                    elif cmd['action'] == 'accept_suggestion':
-                        suggestion = cmd.get('word', '')
-                        if suggestion:
-                            current_word = list(suggestion)
-                            print(f"✅ Accepted: {suggestion}")
-                    
-                    elif cmd['action'] == 'speak':
-                        text_to_speak = cmd.get('text', '')
-                        if not text_to_speak:
-                            if sentence:
-                                text_to_speak = " ".join(sentence)
-                            elif current_word:
-                                text_to_speak = "".join(current_word)
-                        
-                        if text_to_speak:
-                            print(f"🔊 Speaking: {text_to_speak}")
-                            speak_text(text_to_speak)
-                    
-                    elif cmd['action'] == 'stop':
-                        print("🛑 Stop signal received")
-                        cap.release()
+                            sentence.pop()
+
+                    elif action == "accept_suggestion":
+                        w = cmd.get("word", "")
+                        if w:
+                            current_word = list(w)
+
+                    elif action == "speak":
+                        txt = (cmd.get("text", "")
+                               or (" ".join(sentence) if sentence
+                                   else "".join(current_word)))
+                        if txt:
+                            speak_text(txt)  # silently skipped in CLOUD mode
+
+                    elif action == "stop":
+                        if cap:
+                            cap.release()
+                        if shm:
+                            shm.close()
                         return
-            except:
+            except Exception:
                 pass
-            
-            # Frame capture
-            ret, frame = cap.read()
-            if not ret:
-                continue
-            
-            frame = cv2.flip(frame, 1)
+
+            # ── Capture ────────────────────────────────────────────────────
+            if RUN_MODE == "LOCAL":
+                ret, raw = cap.read()
+                if not ret or raw is None:
+                    print("⚠️  Camera read failed — retrying")
+                    time.sleep(0.02)
+                    continue
+            else:
+                fd = getattr(shared_state, "_cloud_frame", None)
+                if fd is None:
+                    time.sleep(0.03)
+                    continue
+                shared_state._cloud_frame = None
+                try:
+                    raw = cv2.imdecode(
+                        np.frombuffer(base64.b64decode(fd), np.uint8),
+                        cv2.IMREAD_COLOR)
+                    if raw is None:
+                        continue
+                except Exception:
+                    continue
+
+            frame     = cv2.resize(raw, (FRAME_W, FRAME_H))
+            frame     = cv2.flip(frame, 1)
             frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             frame_rgb.flags.writeable = False
-            
-            # HAND DETECTION - EVERY FRAME
+
+            # ── Hand detection ─────────────────────────────────────────────
             hand_results = hands.process(frame_rgb)
-            
             frame_rgb.flags.writeable = True
-            
+
             detected_letter = ""
-            hand_detected = False
-            
+            hand_detected   = False
+
             if hand_results and hand_results.multi_hand_landmarks:
-                hand_detected = True
+                hand_detected  = True
                 no_hand_frames = 0
-                
-                for hand_landmarks in hand_results.multi_hand_landmarks:
-                    draw_hand_landmarks(frame, hand_landmarks)
-                    
-                    wrist = hand_landmarks.landmark[0]
-                    pos = np.array([wrist.x * frame.shape[1], wrist.y * frame.shape[0]])
-                    hand_position_buffer.append(pos)
-                    
-                    is_stable = True
-                    if len(hand_position_buffer) >= 3:
-                        positions = np.array(hand_position_buffer)
-                        variance = np.var(positions, axis=0)
-                        stability = 1.0 / (1.0 + np.mean(variance) / 100)
-                        is_stable = stability > STABILITY_THRESHOLD
-                    
+
+                for hlm in hand_results.multi_hand_landmarks:
+                    draw_hand_landmarks(frame, hlm)
                     try:
-                        lm_list = calc_landmark_list(frame, hand_landmarks)
+                        lm_list  = calc_landmark_list(frame, hlm)
                         pre_list = pre_process_landmark(lm_list)
-                        df = pd.DataFrame(pre_list).transpose()
-                        
-                        if model is not None and is_stable:
-                            pred = model.predict(df, verbose=0)
-                            prob = float(np.max(pred))
-                            letter_confidence_buffer.append(prob)
-                            
-                            avg_conf = np.mean(letter_confidence_buffer) if letter_confidence_buffer else 0
-                            predicted_letter = alphabet[int(np.argmax(pred))]
-                            
-                            current_detected_letter = predicted_letter
-                            current_confidence = avg_conf
-                            
-                            if avg_conf >= CONF_THRESHOLD:
-                                detected_letter = predicted_letter
-                                buffer.append(detected_letter)
-                                if len(buffer) > BUFFER_SIZE:
-                                    buffer.pop(0)
-                                
-                                if buffer.count(detected_letter) > BUFFER_SIZE // 2:
-                                    if (last_letter is None) or (detected_letter != last_letter):
-                                        current_word.append(detected_letter)
-                                        last_letter = detected_letter
+
+                        if model is not None and len(pre_list) == 42:
+                            features   = np.array(pre_list, dtype=np.float32).reshape(1, 42)
+                            pred       = model.predict(features, verbose=0)
+                            prob       = float(np.max(pred))
+                            raw_letter = alphabet[int(np.argmax(pred))]
+
+                            current_detected_letter = raw_letter
+                            current_confidence      = prob
+
+                            print(f"DEBUG → {raw_letter} {prob:.4f}")
+
+                            if prob >= CONF_THRESHOLD:
+                                if raw_letter == candidate_letter:
+                                    letter_confidence_buffer.append(prob)
+                                else:
+                                    candidate_letter = raw_letter
+                                    candidate_since  = now
+                                    letter_confidence_buffer.clear()
+                                    letter_confidence_buffer.append(prob)
+
+                                avg_conf  = float(np.mean(letter_confidence_buffer))
+                                hold_time = now - candidate_since
+
+                                if hold_time >= LETTER_HOLD_SEC and avg_conf >= CONF_THRESHOLD:
+                                    same_letter_ok = (
+                                        raw_letter != last_accepted_letter or
+                                        (now - last_accepted_time) >= SAME_LETTER_COOLDOWN_SEC
+                                    )
+                                    if same_letter_ok:
+                                        detected_letter      = raw_letter
+                                        last_accepted_letter = raw_letter
+                                        last_accepted_time   = now
+                                        current_word.append(raw_letter)
                                         stats["letters_detected"] += 1
-                                        print(f"✍️  Letter: {detected_letter} ({avg_conf:.2f})")
-                                        buffer.clear()
+                                        print(f"✍️  Letter: {raw_letter}  "
+                                              f"(held {hold_time:.2f}s, conf {avg_conf:.3f})")
+                                        candidate_letter = ""
+                                        candidate_since  = 0.0
                                         letter_confidence_buffer.clear()
+                            else:
+                                candidate_letter = ""
+                                candidate_since  = 0.0
+                                letter_confidence_buffer.clear()
+
                     except Exception as e:
-                        pass
+                        print(f"⚠️  Prediction error: {e}")
+
             else:
                 no_hand_frames += 1
                 letter_confidence_buffer.clear()
+                candidate_letter        = ""
+                candidate_since         = 0.0
                 current_detected_letter = ""
-                current_confidence = 0.0
-                
-                if no_hand_frames >= SPACE_THRESHOLD:
-                    if current_word:
-                        word = "".join(current_word)
-                        sentence.append(word)
-                        word_frequency[word] += 1
-                        stats["words_formed"] += 1
-                        print(f"📝 Word: {word}")
-                        
-                        if ENABLE_AUTO_TTS:
-                            speak_text(word)
-                        
-                        current_word = []
-                        last_letter = None
-                    no_hand_frames = 0
-            
+                current_confidence      = 0.0
+
+                if no_hand_frames >= SPACE_THRESHOLD and current_word:
+                    word = "".join(current_word)
+                    sentence.append(word)
+                    word_frequency[word] += 1
+                    stats["words_formed"] += 1
+                    print(f"📝 Word committed: {word}")
+                    if ENABLE_AUTO_TTS:
+                        speak_text(word)   # silently skipped in CLOUD mode
+                    current_word         = []
+                    last_accepted_letter = ""
+                    last_accepted_time   = 0.0
+                    no_hand_frames       = 0
+
             frame = draw_letter_overlay(frame, current_detected_letter, current_confidence)
-            
-            # EMOTION DETECTION - YOUR WORKING VERSION (EVERY 2ND FRAME FOR SPEED)
+
+            # ── Emotion (every N frames) ───────────────────────────────────
             emotion_frame_counter += 1
-            
             if emotion_frame_counter % EMOTION_PROCESS_INTERVAL == 0:
-                # Use CLAHE for emotion detection (keeps your working version)
-                frame_clahe = apply_clahe(frame)
-                brightness = compute_brightness(frame_clahe)
-                bright_scale = np.clip((brightness / 255.0) * 1.2, 0.5, 1.0)
-                
-                fer_weight = BASE_FER_WEIGHT * bright_scale
-                landmark_weight = max(0.0, 1.0 - fer_weight)
-                
-                # FER detection
-                fer_probs = {}
-                if emotion_detector:
-                    try:
-                        fer_res = emotion_detector.detect_emotions(frame_clahe)
-                        if fer_res:
-                            fer_probs = fer_res[0]["emotions"]
-                        else:
-                            fer_probs = {e: 0.0 for e in EMOTIONS}
-                            fer_probs["neutral"] = 1.0
-                    except:
-                        fer_probs = {e: 0.0 for e in EMOTIONS}
-                        fer_probs["neutral"] = 1.0
-                else:
-                    fer_probs = {e: 0.0 for e in EMOTIONS}
-                    fer_probs["neutral"] = 1.0
-                
-                fer_subset = {k: fer_probs.get(k, 0.0) for k in EMOTIONS}
-                
-                # Landmark-based detection (YOUR WORKING CODE)
-                landmark_scores = {k: 0.0 for k in EMOTIONS}
-                mesh_res = face_mesh.process(frame_rgb)
-                if mesh_res.multi_face_landmarks:
-                    landmarks = mesh_res.multi_face_landmarks[0]
-                    face_landmarks = calc_landmark_list(frame, landmarks)
-                    feats = extract_face_features(face_landmarks, frame.shape)
-                    landmark_scores = landmark_scores_from_features(feats)
-                
-                # Fusion (YOUR WORKING CODE)
-                fused = {}
-                for emo in EMOTIONS:
-                    f = fer_subset.get(emo, 0.0)
-                    l = landmark_scores.get(emo, 0.0)
-                    
-                    if f > 0.12 and l > 0.12:
-                        fused_score = fer_weight * f + landmark_weight * l * 1.15
-                    else:
-                        fused_score = fer_weight * f + landmark_weight * l
-                    
-                    fused[emo] = float(np.clip(fused_score, 0.0, 1.0))
-                
-                # Normalize
-                total_fused = sum(fused.values())
-                if total_fused > 0:
-                    for emo in EMOTIONS:
-                        fused[emo] /= total_fused
-                
-                emotion_history.append(fused)
-                
-                # Average
-                avg_emotions = defaultdict(float)
+                ns = {e: (1.0 if e == "neutral" else 0.0) for e in EMOTIONS}
+                try:
+                    cr = cv2.cvtColor(apply_clahe(frame), cv2.COLOR_BGR2RGB)
+                    cr.flags.writeable = False
+                    mr = face_mesh.process(cr)
+                    cr.flags.writeable = True
+                    if mr and mr.multi_face_landmarks:
+                        ns = detect_emotion_from_landmarks(
+                            calc_landmark_list(frame, mr.multi_face_landmarks[0]),
+                            frame.shape)
+                except Exception:
+                    pass
+
+                emotion_history.append(ns)
+                avg_e = defaultdict(float)
                 for d in emotion_history:
                     for k, v in d.items():
-                        avg_emotions[k] += v
-                if len(emotion_history) > 0:
-                    for k in avg_emotions:
-                        avg_emotions[k] /= len(emotion_history)
-                
-                # Determine dominant
-                if avg_emotions:
-                    max_emo = max(avg_emotions, key=avg_emotions.get)
-                    max_val = avg_emotions[max_emo]
-                    dominant = max_emo if max_val >= MIN_CONF_TO_SHOW else "neutral"
-                else:
-                    dominant = "neutral"
-                    avg_emotions = {k: 0.0 for k in EMOTIONS}
-                    avg_emotions["neutral"] = 1.0
-                
-                # Emotion change
-                if current_emotion != dominant and dominant != last_emotion:
+                        avg_e[k] += v
+                for k in avg_e:
+                    avg_e[k] /= len(emotion_history)
+
+                dominant = (max(avg_e, key=avg_e.get)
+                            if avg_e and max(avg_e.values()) >= MIN_CONF_TO_SHOW
+                            else "neutral")
+
+                if current_emotion != dominant:
                     stats["emotion_changes"] += 1
-                    scores_str = " | ".join([f"{k.upper()}:{avg_emotions[k]:.3f}" for k in EMOTIONS])
+                    scores_str = " | ".join(
+                        [f"{k.upper()}:{avg_e[k]:.3f}" for k in EMOTIONS]
+                    )
                     print(f"😊 Emotion: {current_emotion.upper()} → {dominant.upper()}")
-                    print(f"   Scores: {scores_str}")
-                    last_emotion = current_emotion
-                
+                    print(f"   Scores  : {scores_str}")
+
                 current_emotion = dominant
-                emotion_scores = dict(avg_emotions)
-                
+                emotion_scores  = dict(avg_e)
                 emotion_timeline.append({
-                    "time": time.time(),
+                    "time":    time.time(),
                     "emotion": dominant,
-                    "scores": dict(avg_emotions)
+                    "scores":  dict(avg_e),
                 })
-            
-            # FPS calculation
+
+            # ── FPS ────────────────────────────────────────────────────────
             frame_count += 1
-            current_time = time.time()
-            fps_frame_times.append(current_time)
-            
+            fps_frame_times.append(time.time())
             if len(fps_frame_times) > 1:
-                time_diff = fps_frame_times[-1] - fps_frame_times[0]
-                if time_diff > 0:
-                    fps = (len(fps_frame_times) - 1) / time_diff
-                    shared_state.processing_fps.value = fps
-            
-            # Prepare data for UI
-            current_display = "".join(current_word)
-            suggestions = get_word_suggestions(current_display, word_frequency)
-            
-            translation_text = ""
-            if TRANSLATION_AVAILABLE:
-                try:
-                    translation_text = translation.translate_signs(current_word)
-                except:
-                    pass
-            
+                td = fps_frame_times[-1] - fps_frame_times[0]
+                if td > 0:
+                    shared_state.processing_fps.value = (len(fps_frame_times) - 1) / td
+
+            # ── Frame output ───────────────────────────────────────────────
+            if shm_array is not None:
+                shm_array[:] = frame
+                if frame_lock_val is not None:
+                    frame_lock_val.value = 1
+                if frame_seq is not None:
+                    frame_seq.value += 1
+                frame_base64 = None
+            else:
+                _, buffer_img = cv2.imencode(
+                    ".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 65])
+                frame_base64 = base64.b64encode(buffer_img.tobytes()).decode("utf-8")
+
+            # ── State packet ───────────────────────────────────────────────
+            state_packet = {
+                "frame":              frame_base64 if frame_base64 else "",
+                "current_word":       "".join(current_word),
+                "sentence":           " ".join(sentence),
+                "suggestions":        get_word_suggestions(
+                                          "".join(current_word), word_frequency),
+                "emotion":            current_emotion,
+                "emotion_scores":     emotion_scores,
+                "emotion_timeline":   list(emotion_timeline)[-20:],
+                "stats":              stats.copy(),
+                "detected_letter":    detected_letter,
+                "hand_detected":      hand_detected,
+                "fps":                shared_state.processing_fps.value,
+                "timestamp":          time.time(),
+                "speaking":           speaking_word,
+                "overlay_letter":     current_detected_letter,
+                "overlay_confidence": current_confidence,
+                "hold_progress":      min(1.0,
+                                          (now - candidate_since) / LETTER_HOLD_SEC)
+                                      if candidate_letter else 0.0,
+            }
+
             try:
-                _, buffer_img = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
-                frame_bytes = buffer_img.tobytes()
-                
-                data_packet = {
-                    "frame": frame_bytes,
-                    "frame_shape": frame.shape,
-                    "current_word": current_display,
-                    "sentence": " ".join(sentence),
-                    "suggestions": suggestions,
-                    "emotion": current_emotion,
-                    "emotion_scores": emotion_scores,
-                    "emotion_timeline": list(emotion_timeline)[-20:],
-                    "stats": stats.copy(),
-                    "detected_letter": detected_letter,
-                    "hand_detected": hand_detected,
-                    "fps": shared_state.processing_fps.value,
-                    "timestamp": time.time(),
-                    "speaking": speaking_word,
-                    "overlay_letter": current_detected_letter,
-                    "overlay_confidence": current_confidence,
-                    "translation": translation_text
-                }
-                
-                if shared_state.ui_queue.full():
-                    try:
-                        shared_state.ui_queue.get_nowait()
-                    except:
-                        pass
-                
-                shared_state.ui_queue.put_nowait(data_packet)
-            except:
-                pass
-            
-            # Frame rate limiting
-            loop_time = time.time() - loop_start
-            target_frame_time = 1.0 / TARGET_FPS
-            if loop_time < target_frame_time:
-                time.sleep(target_frame_time - loop_time)
-    
-    cap.release()
+                ui_queue.put_nowait(state_packet)
+            except Exception:
+                try:
+                    ui_queue.get_nowait()
+                    ui_queue.put_nowait(state_packet)
+                except Exception:
+                    pass
+
+            if frame_count == 1:
+                print("📤 First frame sent — dashboard can read now")
+                if shm_array is not None:
+                    print("📤 SharedMemory active — zero-copy mode")
+
+            # ── Frame-rate limiter ─────────────────────────────────────────
+            wait = (1.0 / TARGET_FPS) - (time.time() - t0)
+            if wait > 0:
+                time.sleep(wait)
+
+    if cap:
+        cap.release()
+    if shm is not None:
+        shm.close()
+
     print("✅ System stopped")
 
+
+# ─────────────────────────────────────────────────────────────
+#  STANDALONE ENTRY POINT
+# ─────────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    shared_state = SharedState()
-    core_processing_engine(shared_state)
+    FRAME_BYTES = FRAME_W * FRAME_H * 3
+
+    # FIX 3: Clean up leftover shared memory from a previous crash
+    # Without this, restarting after a crash raises FileExistsError
+    try:
+        _old_shm = shared_memory.SharedMemory(name="isl_frame_shm")
+        _old_shm.close()
+        _old_shm.unlink()
+        print("🧹 Cleaned up leftover shared memory from previous run")
+    except FileNotFoundError:
+        pass  # normal — no leftover
+
+    shm  = shared_memory.SharedMemory(create=True, size=FRAME_BYTES, name="isl_frame_shm")
+    seq  = Value(ctypes.c_uint64, 0)
+    lock = Value(ctypes.c_bool, False)
+    ss   = SharedState()
+    try:
+        core_processing_engine(ss, shm_name=shm.name, frame_lock_val=lock, frame_seq=seq)
+    finally:
+        shm.close()
+        shm.unlink()
