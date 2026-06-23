@@ -964,9 +964,10 @@
           videoElement.playsInline = true;
           videoElement.muted = true;
           videoElement.style.position = 'absolute';
-          videoElement.style.width = '1px';
-          videoElement.style.height = '1px';
-          videoElement.style.opacity = '0';
+          videoElement.style.top = '-10000px';
+          videoElement.style.left = '-10000px';
+          videoElement.style.width = '320px';
+          videoElement.style.height = '240px';
           videoElement.style.pointerEvents = 'none';
           document.body.appendChild(videoElement);
 
