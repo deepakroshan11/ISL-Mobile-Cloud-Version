@@ -998,8 +998,8 @@
       let socket;
       try {
         socket = io({
-          transports: ['websocket', 'polling'],
-          upgrade: true,
+          transports: ['polling'],
+          upgrade: false,
           reconnectionDelay: 1000
         });
 
