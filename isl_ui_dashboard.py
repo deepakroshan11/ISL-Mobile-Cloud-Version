@@ -938,6 +938,7 @@ def dashboard_process(shared_state, shm_name, frame_lock_val, frame_seq):
         debug=False,
         use_reloader=False,
         log_output=False,
+        allow_unsafe_werkzeug=True,
     )
 
 
