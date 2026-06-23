@@ -943,6 +943,7 @@
 
       /* ── Browser Camera Streaming ──────────────────────────── */
       let cameraStream = null;
+      let videoElement = null;
       const captureCanvas = document.createElement('canvas');
       const captureCtx = captureCanvas.getContext('2d');
 
@@ -957,17 +958,25 @@
             video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'user' },
             audio: false
           });
-          const video = document.createElement('video');
-          video.srcObject = cameraStream;
-          video.autoplay = true;
-          video.playsInline = true;
-          video.addEventListener('loadeddata', () => {
+          videoElement = document.createElement('video');
+          videoElement.srcObject = cameraStream;
+          videoElement.autoplay = true;
+          videoElement.playsInline = true;
+          videoElement.muted = true;
+          videoElement.style.position = 'absolute';
+          videoElement.style.width = '1px';
+          videoElement.style.height = '1px';
+          videoElement.style.opacity = '0';
+          videoElement.style.pointerEvents = 'none';
+          document.body.appendChild(videoElement);
+
+          videoElement.addEventListener('loadeddata', () => {
             captureCanvas.width = 320;
             captureCanvas.height = 240;
             if (!window.cameraInterval) {
               window.cameraInterval = setInterval(() => {
                 if (document.visibilityState === 'visible' && socket && socket.connected) {
-                  captureCtx.drawImage(video, 0, 0, 320, 240);
+                  captureCtx.drawImage(videoElement, 0, 0, 320, 240);
                   const frame = captureCanvas.toDataURL('image/jpeg', 0.6);
                   socket.emit('browser_frame', { frame: frame.split(',')[1] });
                 }
@@ -983,6 +992,11 @@
         if (cameraStream) {
           cameraStream.getTracks().forEach(track => track.stop());
           cameraStream = null;
+        }
+        if (videoElement) {
+          videoElement.srcObject = null;
+          videoElement.remove();
+          videoElement = null;
         }
         if (window.cameraInterval) {
           clearInterval(window.cameraInterval);
