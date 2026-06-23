@@ -30,6 +30,7 @@
 #  ✅ async_mode='threading', transports=['websocket','polling']
 # ════════════════════════════════════════════════════════════════════════════
 
+import os
 import time
 import threading
 import numpy as np
@@ -871,7 +872,14 @@ def on_cmd(data):
 def on_browser_frame(data):
     global _shared_state
     if _shared_state is not None and data and "frame" in data:
-        _shared_state._cloud_frame = data["frame"]
+        b64 = data["frame"]
+        if b64:
+            if hasattr(_shared_state, "put_frame"):
+                _shared_state.put_frame(b64)
+            else:
+                if "," in b64:
+                    b64 = b64.split(",", 1)[1]
+                _shared_state._cloud_frame = b64
 
 
 # ── Dashboard process entry point ─────────────────────────────────────────────
@@ -881,6 +889,23 @@ def dashboard_process(shared_state, shm_name, frame_lock_val, frame_seq):
     _shm_name     = shm_name
     _frame_seq    = frame_seq
     _shared_state = shared_state
+
+    # Start detection engine as daemon thread in CLOUD mode (single process fallback)
+    if os.environ.get("RUN_MODE") == "CLOUD" or shm_name is None:
+        from isl_detection import core_processing_engine
+        det_thread = threading.Thread(
+            target=core_processing_engine,
+            args=(shared_state,),
+            kwargs={
+                "shm_name":       shm_name,
+                "frame_lock_val": frame_lock_val,
+                "frame_seq":      frame_seq,
+            },
+            daemon=True,
+            name="DetectionEngine",
+        )
+        det_thread.start()
+        print("🚀 Detection engine thread started (CLOUD mode)", flush=True)
 
     print("=" * 60)
     print("🌐 ISL Web Dashboard Starting...")
