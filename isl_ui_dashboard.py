@@ -37,7 +37,7 @@ import cv2
 import multiprocessing.shared_memory
 
 from queue import Queue, Empty
-from flask import Flask, render_template_string, Response, jsonify, request
+from flask import Flask, render_template, render_template_string, Response, jsonify, request
 from flask_socketio import SocketIO
 
 # ── App & SocketIO ────────────────────────────────────────────────────────────
@@ -496,11 +496,11 @@ document.addEventListener('DOMContentLoaded', function () {
     const host  = location.hostname;
     const port  = location.port;
     if (port && port !== '80' && port !== '443') {
-      document.getElementById('nav-gesture').href = proto + '//' + host + ':5000/';
-      document.getElementById('nav-avatar').href  = proto + '//' + host + ':5001/';
+      document.getElementById('nav-gesture').href = proto + '//' + host + ':5000/dashboard';
+      document.getElementById('nav-avatar').href  = proto + '//' + host + ':5000/avatar-splash';
     } else {
-      document.getElementById('nav-gesture').href = proto + '//' + host + '/';
-      document.getElementById('nav-avatar').href  = proto + '//' + host + '/avatar/';
+      document.getElementById('nav-gesture').href = proto + '//' + host + '/dashboard';
+      document.getElementById('nav-avatar').href  = proto + '//' + host + '/avatar-splash';
     }
   })();
 
@@ -806,6 +806,16 @@ def generate_frames():
 # ── Routes ────────────────────────────────────────────────────────────────────
 @app.route("/")
 def index():
+    return render_template("splash.html", phase="1", title="Indian Sign Language", subtitle="Gesture & Emotion")
+
+
+@app.route("/avatar-splash")
+def avatar_splash():
+    return render_template("splash.html", phase="2", title="Indian Sign Language", subtitle="Speech & 3D Sign")
+
+
+@app.route("/dashboard")
+def dashboard():
     return render_template_string(HTML)
 
 
@@ -842,12 +852,12 @@ def avatar_redirect():
 # ── Socket.IO events ──────────────────────────────────────────────────────────
 @socketio.on("connect")
 def on_connect():
-    print("🔌 Browser connected")
+    print("[Socket.IO] Browser connected")
 
 
 @socketio.on("disconnect")
 def on_disconnect():
-    print("🔌 Browser disconnected")
+    print("[Socket.IO] Browser disconnected")
 
 
 @socketio.on("command")
@@ -938,4 +948,4 @@ def start_ui_server(shared_state_obj, port: int = 5000):
 
 # ── Stand-alone test ──────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    socketio.run(app, host="0.0.0.0", port=5000, debug=True, use_reloader=False) 
+    socketio.run(app, host="0.0.0.0", port=5000, debug=True, use_reloader=False, allow_unsafe_werkzeug=True) 

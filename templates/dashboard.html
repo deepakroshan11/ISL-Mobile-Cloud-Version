@@ -896,11 +896,11 @@
         var host = location.hostname;
         var port = location.port;
         if (port && port !== '80' && port !== '443') {
-          document.getElementById('nav-gesture').href = proto + '//' + host + ':5000/';
-          document.getElementById('nav-avatar').href = proto + '//' + host + ':5001/';
+          document.getElementById('nav-gesture').href = proto + '//' + host + ':5000/dashboard';
+          document.getElementById('nav-avatar').href = proto + '//' + host + ':5000/avatar-splash';
         } else {
-          document.getElementById('nav-gesture').href = proto + '//' + host + '/';
-          document.getElementById('nav-avatar').href = proto + '//' + host + '/avatar/';
+          document.getElementById('nav-gesture').href = proto + '//' + host + '/dashboard';
+          document.getElementById('nav-avatar').href = proto + '//' + host + '/avatar-splash';
         }
       })();
 
