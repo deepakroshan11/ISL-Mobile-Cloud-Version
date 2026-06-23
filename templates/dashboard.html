@@ -1,922 +1,1163 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
-<meta charset="UTF-8"/>
-<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"/>
-<title>ISL Gesture Recognition — AI Sign Language</title>
-<script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-<link rel="preconnect" href="https://fonts.googleapis.com"/>
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
-<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700&family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet"/>
-<style>
-:root {
-  --bg:    #0d1117;
-  --surf:  #131922;
-  --card:  #1a2233;
-  --bdr:   rgba(212,168,83,.13);
-  --bdrm:  rgba(212,168,83,.30);
-  --bdrh:  rgba(212,168,83,.58);
-  --gold:  #d4a853;
-  --goldb: #f0c76a;
-  --goldd: #a07c3a;
-  --sage:  #7eb89a;
-  --saged: #4e7d66;
-  --txt:   #f0ede6;
-  --txtm:  #a8a096;
-  --txtl:  #5a5650;
-  --red:   #c0614a;
-  --r8:    8px;
-  --r14:   14px;
-  --fD:    'Playfair Display', Georgia, serif;
-  --fB:    'DM Sans', system-ui, sans-serif;
-  --fM:    'DM Mono', monospace;
-}
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>ISL Gesture Recognition — AI Sign Language</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700&family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap"
+    rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #0d1117;
+      --surf: #131922;
+      --card: #1a2233;
+      --bdr: rgba(212, 168, 83, .13);
+      --bdrm: rgba(212, 168, 83, .30);
+      --bdrh: rgba(212, 168, 83, .58);
+      --gold: #d4a853;
+      --goldb: #f0c76a;
+      --goldd: #a07c3a;
+      --sage: #7eb89a;
+      --saged: #4e7d66;
+      --txt: #f0ede6;
+      --txtm: #a8a096;
+      --txtl: #5a5650;
+      --red: #c0614a;
+      --r8: 8px;
+      --r14: 14px;
+      --fD: 'Playfair Display', Georgia, serif;
+      --fB: 'DM Sans', system-ui, sans-serif;
+      --fM: 'DM Mono', monospace;
+    }
 
-*, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
-html, body { height:100%; overflow:hidden; }
+    *,
+    *::before,
+    *::after {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
 
-body {
-  font-family: var(--fB);
-  background: var(--bg);
-  color: var(--txt);
-  -webkit-font-smoothing: antialiased;
-  display: flex;
-  flex-direction: column;
-}
+    html,
+    body {
+      height: 100%;
+      overflow: hidden;
+    }
 
-#app {
-  display: flex;
-  flex: 1;
-  overflow: hidden;
-  height: 100%;
-}
+    body {
+      font-family: var(--fB);
+      background: var(--bg);
+      color: var(--txt);
+      -webkit-font-smoothing: antialiased;
+      display: flex;
+      flex-direction: column;
+    }
 
-#cam-pane {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  background: var(--bg);
-  position: relative;
-  overflow: hidden;
-}
+    #app {
+      display: flex;
+      flex: 1;
+      overflow: hidden;
+      height: 100%;
+    }
 
-.topbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 10px 16px 0;
-  flex-shrink: 0;
-  position: relative;
-  z-index: 5;
-}
-.brand { display: flex; align-items: baseline; gap: 8px; }
-.brand-t {
-  font-family: var(--fD);
-  font-size: 1.1rem;
-  font-weight: 700;
-  color: var(--gold);
-}
-.brand-s {
-  font-size: .65rem;
-  color: var(--txtl);
-  text-transform: uppercase;
-  letter-spacing: .07em;
-}
-.live-badge {
-  font-size: .65rem;
-  font-family: var(--fM);
-  color: var(--sage);
-  background: rgba(126,184,154,.10);
-  border: 1px solid rgba(126,184,154,.25);
-  padding: 3px 9px;
-  border-radius: 20px;
-}
-@keyframes pd { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.6;transform:scale(.8)} }
+    #cam-pane {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+      background: var(--bg);
+      position: relative;
+      overflow: hidden;
+    }
 
-#camera-feed {
-  flex: 1;
-  width: 100%;
-  display: block;
-  object-fit: cover;
-  background: #000;
-}
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 16px 0;
+      flex-shrink: 0;
+      position: relative;
+      z-index: 5;
+    }
 
-.cam-overlay {
-  position: absolute;
-  bottom: 0; left: 0; right: 0;
-  padding: 12px 18px 14px;
-  background: linear-gradient(to top, rgba(13,17,23,1) 55%, transparent);
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 10px;
-  pointer-events: none;
-  z-index: 5;
-}
-.co-letter {
-  font-family: var(--fD);
-  font-size: clamp(2rem, 5vw, 3.2rem);
-  font-weight: 700;
-  color: var(--goldb);
-  line-height: 1;
-}
-.co-word {
-  font-size: .85rem;
-  font-weight: 600;
-  color: var(--gold);
-  font-family: var(--fM);
-  letter-spacing: .05em;
-}
-.co-desc {
-  font-size: .72rem;
-  color: var(--txtm);
-  text-align: right;
-  max-width: 200px;
-  line-height: 1.45;
-}
-.co-progress {
-  position: absolute;
-  bottom: 0; left: 0; right: 0;
-  height: 3px;
-  background: rgba(212,168,83,.08);
-}
-.co-bar {
-  height: 100%;
-  width: 0%;
-  background: linear-gradient(90deg, var(--goldd), var(--goldb));
-  transition: width .3s ease;
-  position: relative;
-  overflow: hidden;
-}
-.co-bar::after {
-  content:'';
-  position:absolute; inset:0;
-  background: linear-gradient(90deg, transparent, rgba(255,255,255,.3), transparent);
-  animation: shimmer 1.8s infinite;
-}
-@keyframes shimmer { from{transform:translateX(-100%)} to{transform:translateX(200%)} }
+    .brand {
+      display: flex;
+      align-items: baseline;
+      gap: 8px;
+    }
 
-.cam-placeholder {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  color: var(--txtl);
-  font-size: .8rem;
-  z-index: 2;
-  pointer-events: none;
-}
-.cam-placeholder .ph-icon { font-size: 2.8rem; opacity: .25; }
+    .brand-t {
+      font-family: var(--fD);
+      font-size: 1.1rem;
+      font-weight: 700;
+      color: var(--gold);
+    }
 
-#ctrl-pane {
-  width: 340px;
-  flex-shrink: 0;
-  display: flex;
-  flex-direction: column;
-  background: var(--surf);
-  border-left: 1px solid var(--bdr);
-  overflow-y: auto;
-  overflow-x: hidden;
-}
-#ctrl-pane::-webkit-scrollbar { width: 4px; }
-#ctrl-pane::-webkit-scrollbar-thumb { background: var(--bdrm); border-radius: 4px; }
+    .brand-s {
+      font-size: .65rem;
+      color: var(--txtl);
+      text-transform: uppercase;
+      letter-spacing: .07em;
+    }
 
-@media (max-width: 720px) {
-  html, body { overflow: hidden; }
-  #app { flex-direction: column; height: 100%; }
+    .live-badge {
+      font-size: .65rem;
+      font-family: var(--fM);
+      color: var(--sage);
+      background: rgba(126, 184, 154, .10);
+      border: 1px solid rgba(126, 184, 154, .25);
+      padding: 3px 9px;
+      border-radius: 20px;
+    }
 
-  #cam-pane {
-    flex: 0 0 46vh;
-    min-height: 260px;
-    max-height: 46vh;
-    width: 100%;
-  }
+    @keyframes pd {
 
-  #ctrl-pane {
-    width: 100%;
-    flex: 1;
-    border-left: none;
-    border-top: 1px solid var(--bdr);
-    overflow-y: auto;
-  }
+      0%,
+      100% {
+        opacity: 1;
+        transform: scale(1)
+      }
 
-  .topbar { padding: 8px 12px 0; }
-  .brand-t { font-size: .95rem; }
-}
+      50% {
+        opacity: .6;
+        transform: scale(.8)
+      }
+    }
 
-.cpanel { padding: 14px 16px; display: flex; flex-direction: column; gap: 12px; }
+    #camera-feed {
+      flex: 1;
+      width: 100%;
+      display: block;
+      object-fit: cover;
+      background: #000;
+    }
 
-.sec-label {
-  font-size: .65rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: .08em;
-  color: var(--txtl);
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-family: var(--fM);
-}
+    .cam-overlay {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      padding: 12px 18px 14px;
+      background: linear-gradient(to top, rgba(13, 17, 23, 1) 55%, transparent);
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 10px;
+      pointer-events: none;
+      z-index: 5;
+    }
 
-.status {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  padding: 7px 13px;
-  border-radius: 30px;
-  font-size: .73rem;
-  font-weight: 500;
-  border: 1px solid var(--bdr);
-  background: var(--card);
-  color: var(--txtm);
-  transition: all .3s;
-  min-height: 34px;
-  font-family: var(--fM);
-}
-.sdot {
-  width: 7px; height: 7px;
-  border-radius: 50%;
-  background: var(--txtl);
-  flex-shrink: 0;
-  transition: all .3s;
-}
-.status.act .sdot { background: var(--sage); box-shadow: 0 0 8px var(--sage); animation: pd 1.4s infinite; }
-.status.act { border-color: rgba(126,184,154,.3); color: var(--sage); }
-.status.err .sdot { background: var(--red); }
-.status.err { border-color: rgba(192,97,74,.3); color: var(--red); }
+    .co-letter {
+      font-family: var(--fD);
+      font-size: clamp(2rem, 5vw, 3.2rem);
+      font-weight: 700;
+      color: var(--goldb);
+      line-height: 1;
+    }
 
-.text-display {
-  background: var(--card);
-  border: 1px solid var(--bdr);
-  border-radius: var(--r14);
-  padding: 10px 13px;
-  min-height: 52px;
-}
-.cur-word {
-  font-size: 1.15rem;
-  font-weight: 700;
-  color: var(--goldb);
-  font-family: var(--fD);
-  line-height: 1.2;
-  margin-bottom: 4px;
-}
-.cur-sentence {
-  font-size: .75rem;
-  color: var(--txtm);
-  line-height: 1.5;
-  font-family: var(--fM);
-}
+    .co-word {
+      font-size: .85rem;
+      font-weight: 600;
+      color: var(--gold);
+      font-family: var(--fM);
+      letter-spacing: .05em;
+    }
 
-.btn-row {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 7px;
-}
+    .co-desc {
+      font-size: .72rem;
+      color: var(--txtm);
+      text-align: right;
+      max-width: 200px;
+      line-height: 1.45;
+    }
 
-.btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 5px;
-  padding: 9px 6px;
-  border: 1px solid transparent;
-  border-radius: var(--r14);
-  font-family: var(--fB);
-  font-size: .76rem;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all .22s;
-  white-space: nowrap;
-  overflow: hidden;
-}
-.btn:active { transform: scale(.96); }
-.btn:disabled { opacity: .4; cursor: not-allowed; }
+    .co-progress {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      height: 3px;
+      background: rgba(212, 168, 83, .08);
+    }
 
-.btn-speak {
-  background: linear-gradient(135deg, #4e7d66, #7eb89a);
-  color: #0d1117;
-  border-color: rgba(126,184,154,.35);
-}
-.btn-speak:hover { box-shadow: 0 4px 16px rgba(126,184,154,.3); }
+    .co-bar {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, var(--goldd), var(--goldb));
+      transition: width .3s ease;
+      position: relative;
+      overflow: hidden;
+    }
 
-.btn-back {
-  background: transparent;
-  color: var(--txtm);
-  border-color: var(--bdr);
-}
-.btn-back:hover { border-color: var(--bdrm); color: var(--txt); }
+    .co-bar::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(90deg, transparent, rgba(255, 255, 255, .3), transparent);
+      animation: shimmer 1.8s infinite;
+    }
 
-.btn-reset {
-  background: transparent;
-  color: var(--red);
-  border-color: rgba(192,97,74,.3);
-}
-.btn-reset:hover { background: rgba(192,97,74,.08); border-color: rgba(192,97,74,.55); }
+    @keyframes shimmer {
+      from {
+        transform: translateX(-100%)
+      }
 
-.divider { height: 1px; background: var(--bdr); margin: 0 -16px; }
+      to {
+        transform: translateX(200%)
+      }
+    }
 
-.emotion-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 8px;
-}
-.emotion-big {
-  font-family: var(--fD);
-  font-size: 1.1rem;
-  font-weight: 700;
-  color: var(--goldb);
-}
-.emotion-icon { font-size: 1.5rem; animation: emojiPop 2.2s ease infinite; }
-@keyframes emojiPop { 0%,100%{transform:scale(1)} 50%{transform:scale(1.12)} }
+    .cam-placeholder {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      color: var(--txtl);
+      font-size: .8rem;
+      z-index: 2;
+      pointer-events: none;
+    }
 
-.emo-bars { display: flex; flex-direction: column; gap: 5px; }
-.emo-bar { display: flex; align-items: center; gap: 8px; }
-.ebo-label {
-  width: 78px;
-  font-size: .72rem;
-  color: var(--txtm);
-  flex-shrink: 0;
-}
-.ebo-track {
-  flex: 1;
-  height: 20px;
-  background: rgba(26,34,51,.8);
-  border-radius: 10px;
-  overflow: hidden;
-  border: 1px solid var(--bdr);
-}
-.ebo-fill {
-  height: 100%;
-  transition: width .5s cubic-bezier(.4,0,.2,1);
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  padding-right: 6px;
-  font-size: .62rem;
-  font-weight: 700;
-  font-family: var(--fM);
-  color: rgba(0,0,0,.75);
-  min-width: 28px;
-}
+    .cam-placeholder .ph-icon {
+      font-size: 2.8rem;
+      opacity: .25;
+    }
 
-.sug-detected {
-  font-size: .65rem;
-  font-family: var(--fM);
-  color: var(--gold);
-  background: rgba(212,168,83,.07);
-  border: 1px solid var(--bdr);
-  border-radius: var(--r8);
-  padding: 4px 10px;
-  margin-bottom: 5px;
-  letter-spacing: .04em;
-}
-.sug-list { display: flex; flex-direction: column; gap: 4px; }
-.sug-item {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  padding: 7px 11px;
-  border-radius: var(--r8);
-  background: var(--card);
-  border: 1px solid var(--bdr);
-  cursor: pointer;
-  transition: all .2s;
-  font-size: .82rem;
-  color: var(--txt);
-}
-.sug-item:hover {
-  background: rgba(212,168,83,.08);
-  border-color: var(--bdrm);
-  transform: translateX(3px);
-  color: var(--goldb);
-}
-.sug-n {
-  font-family: var(--fM);
-  font-size: .65rem;
-  font-weight: 700;
-  color: var(--gold);
-  background: rgba(212,168,83,.12);
-  border: 1px solid rgba(212,168,83,.2);
-  width: 20px; height: 20px;
-  display: flex; align-items: center; justify-content: center;
-  border-radius: 5px;
-  flex-shrink: 0;
-}
-.sug-empty {
-  text-align: center;
-  padding: 16px 0;
-  color: var(--txtl);
-  font-size: .75rem;
-  line-height: 1.7;
-}
+    #ctrl-pane {
+      width: 340px;
+      flex-shrink: 0;
+      display: flex;
+      flex-direction: column;
+      background: var(--surf);
+      border-left: 1px solid var(--bdr);
+      overflow-y: auto;
+      overflow-x: hidden;
+    }
 
-#emotionChart { height: 160px !important; }
+    #ctrl-pane::-webkit-scrollbar {
+      width: 4px;
+    }
 
-.stat-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
-.stat-tile {
-  background: var(--card);
-  border: 1px solid var(--bdr);
-  border-radius: var(--r8);
-  padding: 9px 10px;
-  text-align: center;
-  transition: border-color .25s;
-}
-.stat-tile:hover { border-color: var(--bdrm); }
-.sl {
-  font-size: .55rem;
-  text-transform: uppercase;
-  letter-spacing: .07em;
-  color: var(--txtl);
-  font-weight: 600;
-  margin-bottom: 3px;
-  font-family: var(--fM);
-}
-.sv {
-  font-family: var(--fD);
-  font-size: 1.3rem;
-  font-weight: 700;
-  color: var(--gold);
-  line-height: 1;
-}
+    #ctrl-pane::-webkit-scrollbar-thumb {
+      background: var(--bdrm);
+      border-radius: 4px;
+    }
 
-.about-txt { font-size: .75rem; color: var(--txtm); line-height: 1.75; }
-.about-txt p { margin-bottom: 7px; }
-.alist { list-style: none; margin-bottom: 7px; }
-.alist li {
-  padding-left: 13px;
-  position: relative;
-  font-size: .73rem;
-  padding-bottom: 2px;
-}
-.alist li::before { content: '›'; position: absolute; left: 0; color: var(--gold); font-weight: 700; }
-.acredit {
-  margin-top: 10px;
-  padding-top: 10px;
-  border-top: 1px solid var(--bdr);
-}
-.aname { font-family: var(--fD); color: var(--gold); font-weight: 600; font-size: .88rem; }
-.arole { font-size: .65rem; color: var(--txtl); margin: 2px 0 3px; font-family: var(--fM); }
-.aemail { color: var(--sage); font-size: .66rem; font-family: var(--fM); }
+    @media (max-width: 720px) {
 
-.nav-row { display: flex; gap: 7px; padding: 0 16px 20px; }
-.nav-a {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  padding: 12px 8px;
-  border-radius: var(--r14);
-  border: 1px solid var(--bdr);
-  background: var(--card);
-  color: var(--txtm);
-  text-decoration: none;
-  font-size: .76rem;
-  font-weight: 600;
-  transition: all .25s;
-}
-.nav-a:hover { border-color: var(--bdrm); color: var(--txt); }
-.nav-a.on { background: rgba(212,168,83,.10); border-color: var(--bdrh); color: var(--gold); }
-</style>
+      html,
+      body {
+        overflow: hidden;
+      }
+
+      #app {
+        flex-direction: column;
+        height: 100%;
+      }
+
+      #cam-pane {
+        flex: 0 0 46vh;
+        min-height: 260px;
+        max-height: 46vh;
+        width: 100%;
+      }
+
+      #ctrl-pane {
+        width: 100%;
+        flex: 1;
+        border-left: none;
+        border-top: 1px solid var(--bdr);
+        overflow-y: auto;
+      }
+
+      .topbar {
+        padding: 8px 12px 0;
+      }
+
+      .brand-t {
+        font-size: .95rem;
+      }
+    }
+
+    .cpanel {
+      padding: 14px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .sec-label {
+      font-size: .65rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      color: var(--txtl);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-family: var(--fM);
+    }
+
+    .status {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      padding: 7px 13px;
+      border-radius: 30px;
+      font-size: .73rem;
+      font-weight: 500;
+      border: 1px solid var(--bdr);
+      background: var(--card);
+      color: var(--txtm);
+      transition: all .3s;
+      min-height: 34px;
+      font-family: var(--fM);
+    }
+
+    .sdot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--txtl);
+      flex-shrink: 0;
+      transition: all .3s;
+    }
+
+    .status.act .sdot {
+      background: var(--sage);
+      box-shadow: 0 0 8px var(--sage);
+      animation: pd 1.4s infinite;
+    }
+
+    .status.act {
+      border-color: rgba(126, 184, 154, .3);
+      color: var(--sage);
+    }
+
+    .status.err .sdot {
+      background: var(--red);
+    }
+
+    .status.err {
+      border-color: rgba(192, 97, 74, .3);
+      color: var(--red);
+    }
+
+    .text-display {
+      background: var(--card);
+      border: 1px solid var(--bdr);
+      border-radius: var(--r14);
+      padding: 10px 13px;
+      min-height: 52px;
+    }
+
+    .cur-word {
+      font-size: 1.15rem;
+      font-weight: 700;
+      color: var(--goldb);
+      font-family: var(--fD);
+      line-height: 1.2;
+      margin-bottom: 4px;
+    }
+
+    .cur-sentence {
+      font-size: .75rem;
+      color: var(--txtm);
+      line-height: 1.5;
+      font-family: var(--fM);
+    }
+
+    .btn-row {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 7px;
+    }
+
+    .btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 5px;
+      padding: 9px 6px;
+      border: 1px solid transparent;
+      border-radius: var(--r14);
+      font-family: var(--fB);
+      font-size: .76rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all .22s;
+      white-space: nowrap;
+      overflow: hidden;
+    }
+
+    .btn:active {
+      transform: scale(.96);
+    }
+
+    .btn:disabled {
+      opacity: .4;
+      cursor: not-allowed;
+    }
+
+    .btn-speak {
+      background: linear-gradient(135deg, #4e7d66, #7eb89a);
+      color: #0d1117;
+      border-color: rgba(126, 184, 154, .35);
+    }
+
+    .btn-speak:hover {
+      box-shadow: 0 4px 16px rgba(126, 184, 154, .3);
+    }
+
+    .btn-back {
+      background: transparent;
+      color: var(--txtm);
+      border-color: var(--bdr);
+    }
+
+    .btn-back:hover {
+      border-color: var(--bdrm);
+      color: var(--txt);
+    }
+
+    .btn-reset {
+      background: transparent;
+      color: var(--red);
+      border-color: rgba(192, 97, 74, .3);
+    }
+
+    .btn-reset:hover {
+      background: rgba(192, 97, 74, .08);
+      border-color: rgba(192, 97, 74, .55);
+    }
+
+    .divider {
+      height: 1px;
+      background: var(--bdr);
+      margin: 0 -16px;
+    }
+
+    .emotion-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 8px;
+    }
+
+    .emotion-big {
+      font-family: var(--fD);
+      font-size: 1.1rem;
+      font-weight: 700;
+      color: var(--goldb);
+    }
+
+    .emotion-icon {
+      font-size: 1.5rem;
+      animation: emojiPop 2.2s ease infinite;
+    }
+
+    @keyframes emojiPop {
+
+      0%,
+      100% {
+        transform: scale(1)
+      }
+
+      50% {
+        transform: scale(1.12)
+      }
+    }
+
+    .emo-bars {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+
+    .emo-bar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .ebo-label {
+      width: 78px;
+      font-size: .72rem;
+      color: var(--txtm);
+      flex-shrink: 0;
+    }
+
+    .ebo-track {
+      flex: 1;
+      height: 20px;
+      background: rgba(26, 34, 51, .8);
+      border-radius: 10px;
+      overflow: hidden;
+      border: 1px solid var(--bdr);
+    }
+
+    .ebo-fill {
+      height: 100%;
+      transition: width .5s cubic-bezier(.4, 0, .2, 1);
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      padding-right: 6px;
+      font-size: .62rem;
+      font-weight: 700;
+      font-family: var(--fM);
+      color: rgba(0, 0, 0, .75);
+      min-width: 28px;
+    }
+
+    .sug-detected {
+      font-size: .65rem;
+      font-family: var(--fM);
+      color: var(--gold);
+      background: rgba(212, 168, 83, .07);
+      border: 1px solid var(--bdr);
+      border-radius: var(--r8);
+      padding: 4px 10px;
+      margin-bottom: 5px;
+      letter-spacing: .04em;
+    }
+
+    .sug-list {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .sug-item {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      padding: 7px 11px;
+      border-radius: var(--r8);
+      background: var(--card);
+      border: 1px solid var(--bdr);
+      cursor: pointer;
+      transition: all .2s;
+      font-size: .82rem;
+      color: var(--txt);
+    }
+
+    .sug-item:hover {
+      background: rgba(212, 168, 83, .08);
+      border-color: var(--bdrm);
+      transform: translateX(3px);
+      color: var(--goldb);
+    }
+
+    .sug-n {
+      font-family: var(--fM);
+      font-size: .65rem;
+      font-weight: 700;
+      color: var(--gold);
+      background: rgba(212, 168, 83, .12);
+      border: 1px solid rgba(212, 168, 83, .2);
+      width: 20px;
+      height: 20px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 5px;
+      flex-shrink: 0;
+    }
+
+    .sug-empty {
+      text-align: center;
+      padding: 16px 0;
+      color: var(--txtl);
+      font-size: .75rem;
+      line-height: 1.7;
+    }
+
+    #emotionChart {
+      height: 160px !important;
+    }
+
+    .stat-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 6px;
+    }
+
+    .stat-tile {
+      background: var(--card);
+      border: 1px solid var(--bdr);
+      border-radius: var(--r8);
+      padding: 9px 10px;
+      text-align: center;
+      transition: border-color .25s;
+    }
+
+    .stat-tile:hover {
+      border-color: var(--bdrm);
+    }
+
+    .sl {
+      font-size: .55rem;
+      text-transform: uppercase;
+      letter-spacing: .07em;
+      color: var(--txtl);
+      font-weight: 600;
+      margin-bottom: 3px;
+      font-family: var(--fM);
+    }
+
+    .sv {
+      font-family: var(--fD);
+      font-size: 1.3rem;
+      font-weight: 700;
+      color: var(--gold);
+      line-height: 1;
+    }
+
+    .about-txt {
+      font-size: .75rem;
+      color: var(--txtm);
+      line-height: 1.75;
+    }
+
+    .about-txt p {
+      margin-bottom: 7px;
+    }
+
+    .alist {
+      list-style: none;
+      margin-bottom: 7px;
+    }
+
+    .alist li {
+      padding-left: 13px;
+      position: relative;
+      font-size: .73rem;
+      padding-bottom: 2px;
+    }
+
+    .alist li::before {
+      content: '›';
+      position: absolute;
+      left: 0;
+      color: var(--gold);
+      font-weight: 700;
+    }
+
+    .acredit {
+      margin-top: 10px;
+      padding-top: 10px;
+      border-top: 1px solid var(--bdr);
+    }
+
+    .aname {
+      font-family: var(--fD);
+      color: var(--gold);
+      font-weight: 600;
+      font-size: .88rem;
+    }
+
+    .arole {
+      font-size: .65rem;
+      color: var(--txtl);
+      margin: 2px 0 3px;
+      font-family: var(--fM);
+    }
+
+    .aemail {
+      color: var(--sage);
+      font-size: .66rem;
+      font-family: var(--fM);
+    }
+
+    .nav-row {
+      display: flex;
+      gap: 7px;
+      padding: 0 16px 20px;
+    }
+
+    .nav-a {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      padding: 12px 8px;
+      border-radius: var(--r14);
+      border: 1px solid var(--bdr);
+      background: var(--card);
+      color: var(--txtm);
+      text-decoration: none;
+      font-size: .76rem;
+      font-weight: 600;
+      transition: all .25s;
+    }
+
+    .nav-a:hover {
+      border-color: var(--bdrm);
+      color: var(--txt);
+    }
+
+    .nav-a.on {
+      background: rgba(212, 168, 83, .10);
+      border-color: var(--bdrh);
+      color: var(--gold);
+    }
+  </style>
 </head>
+
 <body>
 
-<div id="app">
+  <div id="app">
 
-  <div id="cam-pane">
-    <div class="topbar">
-      <div class="brand">
-        <span class="brand-t">ISL Gesture Recognition</span>
-        <span class="brand-s">Gesture · Emotion · AI</span>
+    <div id="cam-pane">
+      <div class="topbar">
+        <div class="brand">
+          <span class="brand-t">ISL Gesture Recognition</span>
+          <span class="brand-s">Gesture · Emotion · AI</span>
+        </div>
+        <span class="live-badge" id="live-badge">● Ready</span>
       </div>
-      <span class="live-badge" id="live-badge">● Ready</span>
-    </div>
 
-    <img id="camera-feed"
-         src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"
-         alt="Camera Feed"/>
+      <img id="camera-feed" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"
+        alt="Camera Feed" />
 
-    <div class="cam-placeholder" id="cam-ph">
-      <span class="ph-icon">📷</span>
-      <span style="font-family:var(--fM);font-size:.75rem">Connecting to camera…</span>
-    </div>
+      <div class="cam-placeholder" id="cam-ph">
+        <span class="ph-icon">📷</span>
+        <span style="font-family:var(--fM);font-size:.75rem">Connecting to camera…</span>
+      </div>
 
-    <div class="cam-overlay">
-      <div>
-        <div style="display:flex;align-items:baseline;gap:8px">
-          <span id="co-letter" class="co-letter">🤟</span>
-          <span id="co-word" class="co-word"></span>
+      <div class="cam-overlay">
+        <div>
+          <div style="display:flex;align-items:baseline;gap:8px">
+            <span id="co-letter" class="co-letter">🤟</span>
+            <span id="co-word" class="co-word"></span>
+          </div>
+        </div>
+        <div id="co-desc" class="co-desc">Point camera at your hand</div>
+        <div class="co-progress">
+          <div class="co-bar" id="co-bar"></div>
         </div>
       </div>
-      <div id="co-desc" class="co-desc">Point camera at your hand</div>
-      <div class="co-progress"><div class="co-bar" id="co-bar"></div></div>
     </div>
+
+    <div id="ctrl-pane">
+      <div class="cpanel">
+
+        <div class="status" id="status">
+          <div class="sdot"></div>
+          <span id="stxt">Ready for detection</span>
+        </div>
+
+        <div class="text-display">
+          <div class="cur-word" id="cur-word">—</div>
+          <div class="cur-sentence" id="cur-sentence"></div>
+        </div>
+
+        <div class="btn-row">
+          <button class="btn btn-speak" onclick="sendCmd('speak')">🔊 Speak</button>
+          <button class="btn btn-back" onclick="sendCmd('backspace')">⌫ Back</button>
+          <button class="btn btn-reset" onclick="sendCmd('reset')">🔄 Reset</button>
+        </div>
+
+        <div class="divider"></div>
+
+        <div class="sec-label">😊 Emotion Detection</div>
+        <div class="emotion-header">
+          <span class="emotion-big" id="emo-label">Neutral</span>
+          <span class="emotion-icon" id="emo-icon">😐</span>
+        </div>
+
+        <div class="emo-bars">
+          <div class="emo-bar">
+            <div class="ebo-label">😊 Happy</div>
+            <div class="ebo-track">
+              <div class="ebo-fill" id="bar-happy" style="width:0%;background:linear-gradient(90deg,#3a8a5c,#7eb89a)">0%
+              </div>
+            </div>
+          </div>
+          <div class="emo-bar">
+            <div class="ebo-label">😢 Sad</div>
+            <div class="ebo-track">
+              <div class="ebo-fill" id="bar-sad" style="width:0%;background:linear-gradient(90deg,#3a5a8a,#6090c8)">0%
+              </div>
+            </div>
+          </div>
+          <div class="emo-bar">
+            <div class="ebo-label">😠 Angry</div>
+            <div class="ebo-track">
+              <div class="ebo-fill" id="bar-angry" style="width:0%;background:linear-gradient(90deg,#8a3a3a,#c06060)">0%
+              </div>
+            </div>
+          </div>
+          <div class="emo-bar">
+            <div class="ebo-label">😲 Surprise</div>
+            <div class="ebo-track">
+              <div class="ebo-fill" id="bar-surprise"
+                style="width:0%;background:linear-gradient(90deg,#8a6a1a,#d4a853)">0%</div>
+            </div>
+          </div>
+          <div class="emo-bar">
+            <div class="ebo-label">😐 Neutral</div>
+            <div class="ebo-track">
+              <div class="ebo-fill" id="bar-neutral"
+                style="width:100%;background:linear-gradient(90deg,#3a4455,#5a6878)">100%</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="divider"></div>
+
+        <div class="sec-label">💡 Word Suggestions</div>
+        <div id="sug-area">
+          <div class="sug-empty">Detected letters will appear<br>here with word suggestions</div>
+        </div>
+
+        <div class="divider"></div>
+
+        <div class="sec-label">📈 Emotion Timeline</div>
+        <canvas id="emotionChart"></canvas>
+
+        <div class="divider"></div>
+
+        <div class="sec-label">📊 Statistics</div>
+        <div class="stat-grid">
+          <div class="stat-tile">
+            <div class="sl">FPS</div>
+            <div class="sv" id="s-fps">0</div>
+          </div>
+          <div class="stat-tile">
+            <div class="sl">Letters</div>
+            <div class="sv" id="s-letters">0</div>
+          </div>
+          <div class="stat-tile">
+            <div class="sv" id="s-words">0</div>
+            <div class="sl">Words</div>
+          </div>
+          <div class="stat-tile">
+            <div class="sl">Sentences</div>
+            <div class="sv" id="s-sentences">0</div>
+          </div>
+          <div class="stat-tile">
+            <div class="sl">Emotions</div>
+            <div class="sv" id="s-emotions">0</div>
+          </div>
+          <div class="stat-tile">
+            <div class="sl">Conf.</div>
+            <div class="sv" id="s-conf">—</div>
+          </div>
+        </div>
+
+        <div class="divider"></div>
+
+        <div class="sec-label">ℹ️ About</div>
+        <div class="about-txt">
+          <p>AI Powered ISL Detection is an assistive AI system designed to improve communication between hearing and
+            deaf individuals.</p>
+          <p>This module focuses on real-time gesture and facial emotion recognition using computer vision.</p>
+          <p>Useful for:</p>
+          <ul class="alist">
+            <li>Deaf individuals</li>
+            <li>Inclusive classrooms</li>
+            <li>Assistive communication systems</li>
+            <li>Accessibility and AI research</li>
+          </ul>
+          <div class="acredit">
+            <div class="aname">Deepak Roshan</div>
+            <div class="arole">AI Engineer</div>
+            <div class="aemail">deepakroshan380@gmail.com</div>
+          </div>
+        </div>
+
+      </div>
+
+      <div class="nav-row">
+        <a href="#" class="nav-a on" id="nav-gesture">😊 Gesture Recognition</a>
+        <a href="#" class="nav-a" id="nav-avatar">🤟 Speech-to-Sign</a>
+      </div>
+    </div>
+
   </div>
 
-  <div id="ctrl-pane">
-    <div class="cpanel">
+  <script>
+    document.addEventListener('DOMContentLoaded', function () {
 
-      <div class="status" id="status">
-        <div class="sdot"></div>
-        <span id="stxt">Ready for detection</span>
-      </div>
+      (function () {
+        var proto = location.protocol;
+        var host = location.hostname;
+        var port = location.port;
+        if (port && port !== '80' && port !== '443') {
+          document.getElementById('nav-gesture').href = proto + '//' + host + ':5000/';
+          document.getElementById('nav-avatar').href = proto + '//' + host + ':5001/';
+        } else {
+          document.getElementById('nav-gesture').href = proto + '//' + host + '/';
+          document.getElementById('nav-avatar').href = proto + '//' + host + '/avatar/';
+        }
+      })();
 
-      <div class="text-display">
-        <div class="cur-word" id="cur-word">—</div>
-        <div class="cur-sentence" id="cur-sentence"></div>
-      </div>
+      const EMO_ICONS = { happy: '😊', sad: '😢', angry: '😠', surprise: '😲', neutral: '😐' };
+      const EMO_KEYS = ['happy', 'sad', 'angry', 'surprise', 'neutral'];
 
-      <div class="btn-row">
-        <button class="btn btn-speak" onclick="sendCmd('speak')">🔊 Speak</button>
-        <button class="btn btn-back"  onclick="sendCmd('backspace')">⌫ Back</button>
-        <button class="btn btn-reset" onclick="sendCmd('reset')">🔄 Reset</button>
-      </div>
-
-      <div class="divider"></div>
-
-      <div class="sec-label">😊 Emotion Detection</div>
-      <div class="emotion-header">
-        <span class="emotion-big" id="emo-label">Neutral</span>
-        <span class="emotion-icon" id="emo-icon">😐</span>
-      </div>
-
-      <div class="emo-bars">
-        <div class="emo-bar">
-          <div class="ebo-label">😊 Happy</div>
-          <div class="ebo-track">
-            <div class="ebo-fill" id="bar-happy" style="width:0%;background:linear-gradient(90deg,#3a8a5c,#7eb89a)">0%</div>
-          </div>
-        </div>
-        <div class="emo-bar">
-          <div class="ebo-label">😢 Sad</div>
-          <div class="ebo-track">
-            <div class="ebo-fill" id="bar-sad" style="width:0%;background:linear-gradient(90deg,#3a5a8a,#6090c8)">0%</div>
-          </div>
-        </div>
-        <div class="emo-bar">
-          <div class="ebo-label">😠 Angry</div>
-          <div class="ebo-track">
-            <div class="ebo-fill" id="bar-angry" style="width:0%;background:linear-gradient(90deg,#8a3a3a,#c06060)">0%</div>
-          </div>
-        </div>
-        <div class="emo-bar">
-          <div class="ebo-label">😲 Surprise</div>
-          <div class="ebo-track">
-            <div class="ebo-fill" id="bar-surprise" style="width:0%;background:linear-gradient(90deg,#8a6a1a,#d4a853)">0%</div>
-          </div>
-        </div>
-        <div class="emo-bar">
-          <div class="ebo-label">😐 Neutral</div>
-          <div class="ebo-track">
-            <div class="ebo-fill" id="bar-neutral" style="width:100%;background:linear-gradient(90deg,#3a4455,#5a6878)">100%</div>
-          </div>
-        </div>
-      </div>
-
-      <div class="divider"></div>
-
-      <div class="sec-label">💡 Word Suggestions</div>
-      <div id="sug-area">
-        <div class="sug-empty">Detected letters will appear<br>here with word suggestions</div>
-      </div>
-
-      <div class="divider"></div>
-
-      <div class="sec-label">📈 Emotion Timeline</div>
-      <canvas id="emotionChart"></canvas>
-
-      <div class="divider"></div>
-
-      <div class="sec-label">📊 Statistics</div>
-      <div class="stat-grid">
-        <div class="stat-tile"><div class="sl">FPS</div><div class="sv" id="s-fps">0</div></div>
-        <div class="stat-tile"><div class="sl">Letters</div><div class="sv" id="s-letters">0</div></div>
-        <div class="stat-tile"><div class="sv" id="s-words">0</div><div class="sl">Words</div></div>
-        <div class="stat-tile"><div class="sl">Sentences</div><div class="sv" id="s-sentences">0</div></div>
-        <div class="stat-tile"><div class="sl">Emotions</div><div class="sv" id="s-emotions">0</div></div>
-        <div class="stat-tile"><div class="sl">Conf.</div><div class="sv" id="s-conf">—</div></div>
-      </div>
-
-      <div class="divider"></div>
-
-      <div class="sec-label">ℹ️ About</div>
-      <div class="about-txt">
-        <p>AI Powered ISL Detection is an assistive AI system designed to improve communication between hearing and deaf individuals.</p>
-        <p>This module focuses on real-time gesture and facial emotion recognition using computer vision.</p>
-        <p>Useful for:</p>
-        <ul class="alist">
-          <li>Deaf individuals</li>
-          <li>Inclusive classrooms</li>
-          <li>Assistive communication systems</li>
-          <li>Accessibility and AI research</li>
-        </ul>
-        <div class="acredit">
-          <div class="aname">Deepak Roshan</div>
-          <div class="arole">AI Engineer</div>
-          <div class="aemail">deepakroshan380@gmail.com</div>
-        </div>
-      </div>
-
-    </div>
-
-    <!--
-      FIX 2: Nav links built dynamically from window.location
-      Local dev  (non-80/443 port) → explicit :5000 / :5001 ports
-      Cloud/Nginx (port 80 or 443) → path-based /  and  /avatar/
-    -->
-    <div class="nav-row">
-      <a href="#" class="nav-a on" id="nav-gesture">😊 Gesture Recognition</a>
-      <a href="#" class="nav-a"    id="nav-avatar">🤟 Speech-to-Sign</a>
-    </div>
-  </div>
-
-</div>
-
-<script>
-document.addEventListener('DOMContentLoaded', function () {
-
-  // ══════════════════════════════════════════════════════════
-  //  FIX 2: Dynamic nav links — works on localhost AND cloud
-  //  Old code had hardcoded http://localhost:5000 / :5001
-  //  which broke on any cloud domain or HTTPS deployment.
-  // ══════════════════════════════════════════════════════════
-  (function () {
-    var proto = location.protocol;
-    var host  = location.hostname;
-    var port  = location.port;
-    if (port && port !== '80' && port !== '443') {
-      // Local development — explicit port numbers
-      document.getElementById('nav-gesture').href = proto + '//' + host + ':5000/';
-      document.getElementById('nav-avatar').href  = proto + '//' + host + ':5001/';
-    } else {
-      // Cloud / Nginx — path-based routing
-      document.getElementById('nav-gesture').href = proto + '//' + host + '/';
-      document.getElementById('nav-avatar').href  = proto + '//' + host + '/avatar/';
-    }
-  })();
-
-  const EMO_ICONS = { happy:'😊', sad:'😢', angry:'😠', surprise:'😲', neutral:'😐' };
-  const EMO_KEYS  = ['happy','sad','angry','surprise','neutral'];
-
-  const chartCtx = document.getElementById('emotionChart').getContext('2d');
-  const chart = new Chart(chartCtx, {
-    type: 'line',
-    data: {
-      labels: [],
-      datasets: [
-        { label:'Happy',    data:[], borderColor:'#7eb89a', borderWidth:1.5, tension:.4, fill:false, pointRadius:0 },
-        { label:'Sad',      data:[], borderColor:'#6090c8', borderWidth:1.5, tension:.4, fill:false, pointRadius:0 },
-        { label:'Angry',    data:[], borderColor:'#c06060', borderWidth:1.5, tension:.4, fill:false, pointRadius:0 },
-        { label:'Surprise', data:[], borderColor:'#d4a853', borderWidth:1.5, tension:.4, fill:false, pointRadius:0 },
-        { label:'Neutral',  data:[], borderColor:'#5a6878', borderWidth:1.5, tension:.4, fill:false, pointRadius:0 },
-      ]
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: {
-        legend: { labels: { color:'#5a5650', font:{ size:9, family:"'DM Mono'" }, boxWidth:10 } }
-      },
-      scales: {
-        y: {
-          beginAtZero:true, max:1,
-          ticks: { color:'#5a5650', font:{ size:8 } },
-          grid: { color:'rgba(212,168,83,.05)' }
+      const chartCtx = document.getElementById('emotionChart').getContext('2d');
+      const chart = new Chart(chartCtx, {
+        type: 'line',
+        data: {
+          labels: [],
+          datasets: [
+            { label: 'Happy', data: [], borderColor: '#7eb89a', borderWidth: 1.5, tension: .4, fill: false, pointRadius: 0 },
+            { label: 'Sad', data: [], borderColor: '#6090c8', borderWidth: 1.5, tension: .4, fill: false, pointRadius: 0 },
+            { label: 'Angry', data: [], borderColor: '#c06060', borderWidth: 1.5, tension: .4, fill: false, pointRadius: 0 },
+            { label: 'Surprise', data: [], borderColor: '#d4a853', borderWidth: 1.5, tension: .4, fill: false, pointRadius: 0 },
+            { label: 'Neutral', data: [], borderColor: '#5a6878', borderWidth: 1.5, tension: .4, fill: false, pointRadius: 0 },
+          ]
         },
-        x: {
-          ticks: { display:false },
-          grid: { color:'rgba(212,168,83,.03)' }
-        }
-      },
-      animation: false
-    }
-  });
-
-  /* ── Browser Camera Streaming ──────────────────────────── */
-  let cameraStream = null;
-  const captureCanvas = document.createElement('canvas');
-  const captureCtx = captureCanvas.getContext('2d');
-
-  async function startBrowserCamera() {
-    if (cameraStream) return;
-    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      console.error('Camera API not supported — requires HTTPS on cloud');
-      return;
-    }
-    try {
-      cameraStream = await navigator.mediaDevices.getUserMedia({
-        video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'user' },
-        audio: false
-      });
-      const video = document.createElement('video');
-      video.srcObject  = cameraStream;
-      video.autoplay   = true;
-      video.playsInline = true;
-      video.addEventListener('loadeddata', () => {
-        captureCanvas.width  = 320;
-        captureCanvas.height = 240;
-        if (!window.cameraInterval) {
-          window.cameraInterval = setInterval(() => {
-            if (document.visibilityState === 'visible' && socket && socket.connected) {
-              captureCtx.drawImage(video, 0, 0, 320, 240);
-              const frame = captureCanvas.toDataURL('image/jpeg', 0.6);
-              socket.emit('browser_frame', { frame: frame.split(',')[1] });
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { labels: { color: '#5a5650', font: { size: 9, family: "'DM Mono'" }, boxWidth: 10 } }
+          },
+          scales: {
+            y: {
+              beginAtZero: true, max: 1,
+              ticks: { color: '#5a5650', font: { size: 8 } },
+              grid: { color: 'rgba(212,168,83,.05)' }
+            },
+            x: {
+              ticks: { display: false },
+              grid: { color: 'rgba(212,168,83,.03)' }
             }
-          }, 65); // ~15 FPS
+          },
+          animation: false
         }
       });
-    } catch (err) {
-      console.error('Camera access error:', err);
-    }
-  }
 
-  function stopBrowserCamera() {
-    if (cameraStream) {
-      cameraStream.getTracks().forEach(track => track.stop());
-      cameraStream = null;
-    }
-    if (window.cameraInterval) {
-      clearInterval(window.cameraInterval);
-      window.cameraInterval = null;
-    }
-  }
+      /* ── Browser Camera Streaming ──────────────────────────── */
+      let cameraStream = null;
+      const captureCanvas = document.createElement('canvas');
+      const captureCtx = captureCanvas.getContext('2d');
 
-  /* ── Socket.IO ──────────────────────────────────────────── */
-  // ══════════════════════════════════════════════════════════
-  //  FIX 1: Connect to default namespace '/' (not '/isl')
-  //  Old code: socket = io('/isl')  ← backend has no /isl namespace
-  //  The backend registers handlers on the DEFAULT namespace.
-  //  Connecting to '/isl' meant the socket connected but never
-  //  received any 'state_update' or 'update' events — silent failure.
-  //  Also matches transports to backend's async_mode='threading'.
-  // ══════════════════════════════════════════════════════════
-  let socket;
-  try {
-    socket = io({ transports: ['polling'], reconnectionDelay: 1000 });
+      async function startBrowserCamera() {
+        if (cameraStream) return;
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+          console.error('Camera API not supported — requires HTTPS on cloud');
+          return;
+        }
+        try {
+          cameraStream = await navigator.mediaDevices.getUserMedia({
+            video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'user' },
+            audio: false
+          });
+          const video = document.createElement('video');
+          video.srcObject = cameraStream;
+          video.autoplay = true;
+          video.playsInline = true;
+          video.addEventListener('loadeddata', () => {
+            captureCanvas.width = 320;
+            captureCanvas.height = 240;
+            if (!window.cameraInterval) {
+              window.cameraInterval = setInterval(() => {
+                if (document.visibilityState === 'visible' && socket && socket.connected) {
+                  captureCtx.drawImage(video, 0, 0, 320, 240);
+                  const frame = captureCanvas.toDataURL('image/jpeg', 0.6);
+                  socket.emit('browser_frame', { frame: frame.split(',')[1] });
+                }
+              }, 65); // ~15 FPS
+            }
+          });
+        } catch (err) {
+          console.error('Camera access error:', err);
+        }
+      }
 
-    socket.on('connect', () => {
-      setStat('act', 'Connected — detecting…');
-      document.getElementById('cam-ph').style.display = 'none';
-      document.getElementById('live-badge').textContent = '● Live';
-      startBrowserCamera();
-    });
+      function stopBrowserCamera() {
+        if (cameraStream) {
+          cameraStream.getTracks().forEach(track => track.stop());
+          cameraStream = null;
+        }
+        if (window.cameraInterval) {
+          clearInterval(window.cameraInterval);
+          window.cameraInterval = null;
+        }
+      }
 
-    socket.on('disconnect', () => {
-      setStat('', 'Disconnected');
-      document.getElementById('cam-ph').style.display = 'flex';
-      document.getElementById('live-badge').textContent = '● Offline';
-      stopBrowserCamera();
-    });
-
-    // Listen on 'state_update' — matches socketio.emit('state_update', packet)
-    // in isl_ui_dashboard.py's StateEmit thread.
-    // (Old code listened on 'update' which the backend never emits.)
-    socket.on('state_update', (data) => {
+      /* ── Socket.IO ──────────────────────────────────────────── */
+      // ✅ FIX: transports updated to prefer WebSocket with polling fallback.
+      //    upgrade:true lets Socket.IO automatically upgrade from polling → websocket
+      //    once the connection is established. This is required for camera streaming
+      //    to work reliably on HuggingFace Spaces (HTTPS) and other cloud deployments.
+      let socket;
       try {
-        if (data.frame) {
-          document.getElementById('camera-feed').src = 'data:image/jpeg;base64,' + data.frame;
+        socket = io({
+          transports: ['websocket', 'polling'],
+          upgrade: true,
+          reconnectionDelay: 1000
+        });
+
+        socket.on('connect', () => {
+          setStat('act', 'Connected — detecting…');
           document.getElementById('cam-ph').style.display = 'none';
+          document.getElementById('live-badge').textContent = '● Live';
+          startBrowserCamera();
+        });
+
+        socket.on('disconnect', () => {
+          setStat('', 'Disconnected');
+          document.getElementById('cam-ph').style.display = 'flex';
+          document.getElementById('live-badge').textContent = '● Offline';
+          stopBrowserCamera();
+        });
+
+        socket.on('state_update', (data) => {
+          try {
+            if (data.frame) {
+              document.getElementById('camera-feed').src = 'data:image/jpeg;base64,' + data.frame;
+              document.getElementById('cam-ph').style.display = 'none';
+            }
+
+            const letterEl = document.getElementById('co-letter');
+            const wordEl = document.getElementById('co-word');
+            const descEl = document.getElementById('co-desc');
+
+            if (data.overlay_letter) {
+              letterEl.textContent = data.overlay_letter.toUpperCase();
+            }
+
+            if (data.current_word !== undefined) {
+              const w = data.current_word || '—';
+              wordEl.textContent = w;
+              document.getElementById('cur-word').textContent = w;
+            }
+
+            if (data.sentence !== undefined) {
+              document.getElementById('cur-sentence').textContent = data.sentence || '';
+            }
+
+            if (data.overlay_confidence !== undefined) {
+              const pct = Math.round(data.overlay_confidence * 100);
+              descEl.textContent = 'Confidence: ' + pct + '%';
+              document.getElementById('s-conf').textContent = pct + '%';
+              document.getElementById('co-bar').style.width = pct + '%';
+            }
+
+            if (data.fps !== undefined) {
+              document.getElementById('s-fps').textContent = Math.round(data.fps);
+            }
+
+            if (data.stats) {
+              document.getElementById('s-letters').textContent = data.stats.letters_detected || 0;
+              document.getElementById('s-words').textContent = data.stats.words_formed || 0;
+              document.getElementById('s-sentences').textContent = data.stats.sentences_formed || 0;
+              document.getElementById('s-emotions').textContent = data.stats.emotion_changes || 0;
+            }
+
+            if (Array.isArray(data.suggestions)) {
+              updateSuggestions(data.suggestions, data.current_word);
+            }
+
+            if (data.emotion_scores) {
+              updateEmotion(data.emotion || 'neutral', data.emotion_scores);
+            }
+
+            if (data.emotion_timeline && data.emotion_timeline.length > 0) {
+              updateChart(data.emotion_timeline);
+            }
+
+          } catch (e) { console.error('Update error:', e); }
+        });
+
+      } catch (e) {
+        console.warn('Socket.IO unavailable — demo mode');
+      }
+
+      /* ── Update emotion bars ────────────────────────────────── */
+      function updateEmotion(emotion, scores) {
+        document.getElementById('emo-label').textContent = emotion.charAt(0).toUpperCase() + emotion.slice(1);
+        document.getElementById('emo-icon').textContent = EMO_ICONS[emotion] || '😐';
+        EMO_KEYS.forEach(k => {
+          const bar = document.getElementById('bar-' + k);
+          if (!bar) return;
+          let s = Math.max(0, Math.min(1, scores[k] || 0));
+          const pct = Math.round(s * 100);
+          bar.style.width = pct + '%';
+          bar.textContent = pct + '%';
+        });
+      }
+
+      /* ── Update suggestions ─────────────────────────────────── */
+      function updateSuggestions(suggestions, currentWord) {
+        const area = document.getElementById('sug-area');
+        if (!suggestions || !suggestions.length) {
+          area.innerHTML = '<div class="sug-empty">Detected letters will appear<br>here with word suggestions</div>';
+          return;
         }
+        const detectedRow = currentWord
+          ? '<div class="sug-detected">Detected: ' + currentWord.toUpperCase() + '</div>' : '';
+        area.innerHTML = detectedRow + '<div class="sug-list">' +
+          suggestions.map((w, i) =>
+            '<div class="sug-item" onclick="window.acceptSug(\'' + w + '\')">' +
+            '<span class="sug-n">' + (i + 1) + '</span>' + w + '</div>'
+          ).join('') + '</div>';
+      }
 
-        const letterEl = document.getElementById('co-letter');
-        const wordEl   = document.getElementById('co-word');
-        const descEl   = document.getElementById('co-desc');
+      /* ── Update chart ───────────────────────────────────────── */
+      function updateChart(timeline) {
+        if (!timeline || !timeline.length) return;
+        const collected = Object.fromEntries(EMO_KEYS.map(k => [k, []]));
+        timeline.forEach(tp => {
+          const s = tp.scores || {};
+          EMO_KEYS.forEach(k => collected[k].push(s[k] || 0));
+        });
+        chart.data.labels = timeline.map((_, i) => i);
+        chart.data.datasets.forEach((ds, i) => ds.data = collected[EMO_KEYS[i]]);
+        chart.update('none');
+      }
 
-        if (data.overlay_letter) {
-          letterEl.textContent = data.overlay_letter.toUpperCase();
+      /* ── Status helper ──────────────────────────────────────── */
+      function setStat(cls, msg) {
+        document.getElementById('stxt').textContent = msg;
+        document.getElementById('status').className = 'status' + (cls ? ' ' + cls : '');
+      }
+
+      /* ── Global handlers ────────────────────────────────────── */
+      window.sendCmd = function (action) {
+        if (action === 'speak') {
+          const sentence = document.getElementById('cur-sentence').textContent.trim();
+          const word = document.getElementById('cur-word').textContent.trim();
+          const text = sentence || (word !== '—' ? word : '');
+          if (text && socket) socket.emit('command', { action: 'speak', text });
+        } else {
+          if (socket) socket.emit('command', { action });
         }
+      };
 
-        if (data.current_word !== undefined) {
-          const w = data.current_word || '—';
-          wordEl.textContent = w;
-          document.getElementById('cur-word').textContent = w;
+      window.acceptSug = function (word) {
+        if (socket) socket.emit('command', { action: 'accept_suggestion', word });
+      };
+
+      /* ── Keyboard shortcuts ─────────────────────────────────── */
+      document.addEventListener('keydown', e => {
+        if (e.ctrlKey && e.key === 's') { e.preventDefault(); window.sendCmd('speak'); }
+        if (e.ctrlKey && e.key === 'r') { e.preventDefault(); window.sendCmd('reset'); }
+        if (e.ctrlKey && e.key === 'Backspace') { e.preventDefault(); window.sendCmd('backspace'); }
+        if (['1', '2', '3'].includes(e.key)) {
+          const items = document.querySelectorAll('.sug-item');
+          const item = items[parseInt(e.key) - 1];
+          if (item) item.click();
         }
+      });
 
-        if (data.sentence !== undefined) {
-          document.getElementById('cur-sentence').textContent = data.sentence || '';
-        }
-
-        if (data.overlay_confidence !== undefined) {
-          const pct = Math.round(data.overlay_confidence * 100);
-          descEl.textContent = 'Confidence: ' + pct + '%';
-          document.getElementById('s-conf').textContent = pct + '%';
-          document.getElementById('co-bar').style.width = pct + '%';
-        }
-
-        if (data.fps !== undefined) {
-          document.getElementById('s-fps').textContent = Math.round(data.fps);
-        }
-
-        if (data.stats) {
-          document.getElementById('s-letters').textContent   = data.stats.letters_detected  || 0;
-          document.getElementById('s-words').textContent     = data.stats.words_formed       || 0;
-          document.getElementById('s-sentences').textContent = data.stats.sentences_formed   || 0;
-          document.getElementById('s-emotions').textContent  = data.stats.emotion_changes    || 0;
-        }
-
-        if (Array.isArray(data.suggestions)) {
-          updateSuggestions(data.suggestions, data.current_word);
-        }
-
-        if (data.emotion_scores) {
-          updateEmotion(data.emotion || 'neutral', data.emotion_scores);
-        }
-
-        if (data.emotion_timeline && data.emotion_timeline.length > 0) {
-          updateChart(data.emotion_timeline);
-        }
-
-      } catch (e) { console.error('Update error:', e); }
     });
-
-  } catch (e) {
-    console.warn('Socket.IO unavailable — demo mode');
-  }
-
-  /* ── Update emotion bars ────────────────────────────────── */
-  function updateEmotion(emotion, scores) {
-    document.getElementById('emo-label').textContent = emotion.charAt(0).toUpperCase() + emotion.slice(1);
-    document.getElementById('emo-icon').textContent  = EMO_ICONS[emotion] || '😐';
-    EMO_KEYS.forEach(k => {
-      const bar = document.getElementById('bar-' + k);
-      if (!bar) return;
-      let s = Math.max(0, Math.min(1, scores[k] || 0));
-      const pct = Math.round(s * 100);
-      bar.style.width = pct + '%';
-      bar.textContent = pct + '%';
-    });
-  }
-
-  /* ── Update suggestions ─────────────────────────────────── */
-  function updateSuggestions(suggestions, currentWord) {
-    const area = document.getElementById('sug-area');
-    if (!suggestions || !suggestions.length) {
-      area.innerHTML = '<div class="sug-empty">Detected letters will appear<br>here with word suggestions</div>';
-      return;
-    }
-    const detectedRow = currentWord
-      ? '<div class="sug-detected">Detected: ' + currentWord.toUpperCase() + '</div>' : '';
-    area.innerHTML = detectedRow + '<div class="sug-list">' +
-      suggestions.map((w, i) =>
-        '<div class="sug-item" onclick="window.acceptSug(\'' + w + '\')">' +
-        '<span class="sug-n">' + (i + 1) + '</span>' + w + '</div>'
-      ).join('') + '</div>';
-  }
-
-  /* ── Update chart ───────────────────────────────────────── */
-  function updateChart(timeline) {
-    if (!timeline || !timeline.length) return;
-    const collected = Object.fromEntries(EMO_KEYS.map(k => [k, []]));
-    timeline.forEach(tp => {
-      const s = tp.scores || {};
-      EMO_KEYS.forEach(k => collected[k].push(s[k] || 0));
-    });
-    chart.data.labels = timeline.map((_, i) => i);
-    chart.data.datasets.forEach((ds, i) => ds.data = collected[EMO_KEYS[i]]);
-    chart.update('none');
-  }
-
-  /* ── Status helper ──────────────────────────────────────── */
-  function setStat(cls, msg) {
-    document.getElementById('stxt').textContent = msg;
-    document.getElementById('status').className = 'status' + (cls ? ' ' + cls : '');
-  }
-
-  /* ── Global handlers ────────────────────────────────────── */
-  window.sendCmd = function (action) {
-    if (action === 'speak') {
-      const sentence = document.getElementById('cur-sentence').textContent.trim();
-      const word     = document.getElementById('cur-word').textContent.trim();
-      const text     = sentence || (word !== '—' ? word : '');
-      if (text && socket) socket.emit('command', { action: 'speak', text });
-    } else {
-      if (socket) socket.emit('command', { action });
-    }
-  };
-
-  window.acceptSug = function (word) {
-    if (socket) socket.emit('command', { action: 'accept_suggestion', word });
-  };
-
-  /* ── Keyboard shortcuts ─────────────────────────────────── */
-  document.addEventListener('keydown', e => {
-    if (e.ctrlKey && e.key === 's')         { e.preventDefault(); window.sendCmd('speak'); }
-    if (e.ctrlKey && e.key === 'r')         { e.preventDefault(); window.sendCmd('reset'); }
-    if (e.ctrlKey && e.key === 'Backspace') { e.preventDefault(); window.sendCmd('backspace'); }
-    if (['1', '2', '3'].includes(e.key)) {
-      const items = document.querySelectorAll('.sug-item');
-      const item  = items[parseInt(e.key) - 1];
-      if (item) item.click();
-    }
-  });
-
-});
-</script>
+  </script>
 </body>
+
 </html>

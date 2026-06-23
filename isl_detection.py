@@ -498,7 +498,7 @@ def core_processing_engine(shared_state, shm_name=None, frame_lock_val=None, fra
         print(f"⚠️  Warmup: {e}")
 
     alphabet = list(string.ascii_uppercase) + [str(i) for i in range(1, 10)]
-    print(f"   Alphabet : {len(alphabet)} classes  (model outputs {model.output_shape[1]})")
+    print(f"   Alphabet : A-Z letters only  (model outputs {model.output_shape[1]} classes, digits ignored)")
 
     # ── Detection state ────────────────────────────────────────────────────
     current_word             = []
@@ -711,6 +711,12 @@ def core_processing_engine(shared_state, shm_name=None, frame_lock_val=None, fra
                             pred       = model.predict(features, verbose=0)
                             prob       = float(np.max(pred))
                             raw_letter = alphabet[int(np.argmax(pred))]
+
+                            # Skip number predictions — only A-Z letters
+                            if raw_letter.isdigit():
+                                current_detected_letter = ""
+                                current_confidence      = 0.0
+                                continue
 
                             current_detected_letter = raw_letter
                             current_confidence      = prob

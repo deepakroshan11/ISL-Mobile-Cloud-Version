@@ -16,12 +16,18 @@
 #           the built-in laptop webcam display.
 #           Also removed unreachable `return` after infinite fallback loop.
 #
+#  TRANSPORT FIX:
+#  FIX 6 — transports updated to ['websocket', 'polling'] with upgrade:true
+#           in the embedded HTML Socket.IO client. Polling-only breaks camera
+#           streaming on HuggingFace Spaces (HTTPS) and other cloud hosts.
+#           WebSocket is tried first; polling is the automatic fallback.
+#
 #  ALL original features preserved:
 #  ✅ MJPEG /video_feed from SharedMemory (zero-copy)
 #  ✅ Socket.IO state_update events (emotion, word, suggestions, stats)
 #  ✅ Speak, Backspace, Reset commands
 #  ✅ Emotion bars, Chart.js timeline, word suggestions
-#  ✅ async_mode='threading', transports=['polling']
+#  ✅ async_mode='threading', transports=['websocket','polling']
 # ════════════════════════════════════════════════════════════════════════════
 
 import time
@@ -576,9 +582,17 @@ document.addEventListener('DOMContentLoaded', function () {
   }
 
   /* ── Socket.IO ───────────────────────────────────────────── */
+  // ✅ FIX 6: transports updated to prefer WebSocket with polling fallback.
+  //    upgrade:true lets Socket.IO automatically upgrade from polling → websocket
+  //    once the connection is established. This is required for camera streaming
+  //    to work reliably on HuggingFace Spaces (HTTPS) and other cloud deployments.
   let socket;
   try {
-    socket = io({ transports: ['polling'], reconnectionDelay: 1000 });
+    socket = io({
+      transports: ['websocket', 'polling'],
+      upgrade: true,
+      reconnectionDelay: 1000
+    });
 
     socket.on('connect', () => {
       setStat('act', 'Connected — detecting…');
@@ -828,7 +842,7 @@ def avatar_redirect():
 # ── Socket.IO events ──────────────────────────────────────────────────────────
 @socketio.on("connect")
 def on_connect():
-    print("🔌 Browser connected (polling)")
+    print("🔌 Browser connected")
 
 
 @socketio.on("disconnect")
@@ -924,4 +938,4 @@ def start_ui_server(shared_state_obj, port: int = 5000):
 
 # ── Stand-alone test ──────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    socketio.run(app, host="0.0.0.0", port=5000, debug=True, use_reloader=False)
+    socketio.run(app, host="0.0.0.0", port=5000, debug=True, use_reloader=False) 
