@@ -842,7 +842,7 @@ def core_processing_engine(shared_state, shm_name=None, frame_lock_val=None, fra
                 # Send full 640×480 frame — browser displays at native resolution.
                 # Skeleton/overlay removed so JPEG compresses cleanly at quality 75.
                 _, buffer_img = cv2.imencode(
-                    ".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 75])
+                    ".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
                 frame_base64 = base64.b64encode(buffer_img.tobytes()).decode("utf-8")
 
             # ── State packet ───────────────────────────────────────────────
