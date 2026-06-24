@@ -942,8 +942,12 @@
       });
 
       /* ── Browser Camera Streaming ──────────────────────────── */
+      // PERF: 160×120 @ quality 0.35 ≈ 6–8 KB per frame (was 320×240 @ 0.6 ≈ 50 KB).
+      // Sending at 4 fps (250 ms) avoids nginx disk-buffering warnings and the
+      // engineio "Too many packets in payload" error that was causing hard lag.
       let cameraStream = null;
       let videoElement = null;
+      let _frameInFlight = false;      // flow control — one frame at a time
       const captureCanvas = document.createElement('canvas');
       const captureCtx = captureCanvas.getContext('2d');
 
@@ -955,7 +959,7 @@
         }
         try {
           cameraStream = await navigator.mediaDevices.getUserMedia({
-            video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'user' },
+            video: { width: { ideal: 320 }, height: { ideal: 240 }, facingMode: 'user' },
             audio: false
           });
           videoElement = document.createElement('video');
@@ -966,22 +970,27 @@
           videoElement.style.position = 'absolute';
           videoElement.style.top = '-10000px';
           videoElement.style.left = '-10000px';
-          videoElement.style.width = '320px';
-          videoElement.style.height = '240px';
+          videoElement.style.width = '160px';
+          videoElement.style.height = '120px';
           videoElement.style.pointerEvents = 'none';
           document.body.appendChild(videoElement);
 
           videoElement.addEventListener('loadeddata', () => {
-            captureCanvas.width = 320;
-            captureCanvas.height = 240;
+            captureCanvas.width  = 160;
+            captureCanvas.height = 120;
             if (!window.cameraInterval) {
               window.cameraInterval = setInterval(() => {
+                // Skip if a frame is still being processed by server
+                if (_frameInFlight) return;
                 if (document.visibilityState === 'visible' && socket && socket.connected) {
-                  captureCtx.drawImage(videoElement, 0, 0, 320, 240);
-                  const frame = captureCanvas.toDataURL('image/jpeg', 0.6);
+                  captureCtx.drawImage(videoElement, 0, 0, 160, 120);
+                  const frame = captureCanvas.toDataURL('image/jpeg', 0.35);
+                  _frameInFlight = true;
                   socket.emit('browser_frame', { frame: frame.split(',')[1] });
+                  // Auto-release lock after 500ms even if no ack received
+                  setTimeout(() => { _frameInFlight = false; }, 500);
                 }
-              }, 65); // ~15 FPS
+              }, 250); // 4 fps — smooth without overwhelming polling transport
             }
           });
         } catch (err) {
@@ -1033,6 +1042,8 @@
         });
 
         socket.on('state_update', (data) => {
+          // Release in-flight lock — server has processed our frame
+          _frameInFlight = false;
           try {
             if (data.frame) {
               document.getElementById('camera-feed').src = 'data:image/jpeg;base64,' + data.frame;

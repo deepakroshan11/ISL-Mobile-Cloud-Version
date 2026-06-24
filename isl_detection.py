@@ -843,8 +843,12 @@ def core_processing_engine(shared_state, shm_name=None, frame_lock_val=None, fra
                     frame_seq.value += 1
                 frame_base64 = None
             else:
+                # PERF: Resize to 320×240 before encoding to halve payload size.
+                # 640×480 @ q65 ≈ 40KB; 320×240 @ q70 ≈ 12KB — 3× smaller.
+                # Browser renders it full-width so it still looks fine.
+                display = cv2.resize(frame, (320, 240))
                 _, buffer_img = cv2.imencode(
-                    ".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 65])
+                    ".jpg", display, [cv2.IMWRITE_JPEG_QUALITY, 70])
                 frame_base64 = base64.b64encode(buffer_img.tobytes()).decode("utf-8")
 
             # ── State packet ───────────────────────────────────────────────
