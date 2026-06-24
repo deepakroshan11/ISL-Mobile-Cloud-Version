@@ -674,7 +674,10 @@ def core_processing_engine(shared_state, shm_name=None, frame_lock_val=None, fra
                 except Exception:
                     continue
 
-            frame     = cv2.resize(raw, (FRAME_W, FRAME_H))
+            if RUN_MODE == "LOCAL":
+                frame = cv2.resize(raw, (FRAME_W, FRAME_H))
+            else:
+                frame = raw
             frame     = cv2.flip(frame, 1)
             frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             frame_rgb.flags.writeable = False
