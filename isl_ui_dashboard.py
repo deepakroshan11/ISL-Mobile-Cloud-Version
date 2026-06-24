@@ -66,7 +66,8 @@ _frame_seq  = None
 _shared_state = None
 
 # ── HTML ──────────────────────────────────────────────────────────────────────
-HTML = r"""
+HTML = ""
+_DUMMY_UNUSED_HTML = r"""
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -817,7 +818,7 @@ def avatar_splash():
 
 @app.route("/dashboard")
 def dashboard():
-    return render_template_string(HTML)
+    return render_template("dashboard.html")
 
 
 @app.route("/video_feed")
