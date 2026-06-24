@@ -942,9 +942,9 @@
       });
 
       /* ── Browser Camera Streaming ──────────────────────────── */
-      // PERF: 160×120 @ quality 0.35 ≈ 6–8 KB per frame (was 320×240 @ 0.6 ≈ 50 KB).
-      // Sending at 4 fps (250 ms) avoids nginx disk-buffering warnings and the
-      // engineio "Too many packets in payload" error that was causing hard lag.
+      // 320×240 @ quality 0.5 ≈ 15–20 KB per frame.
+      // nginx client_body_buffer_size is now 512k so these stay in RAM.
+      // Flow control (one frame in-flight) prevents queue buildup.
       let cameraStream = null;
       let videoElement = null;
       let _frameInFlight = false;      // flow control — one frame at a time
@@ -970,25 +970,25 @@
           videoElement.style.position = 'absolute';
           videoElement.style.top = '-10000px';
           videoElement.style.left = '-10000px';
-          videoElement.style.width = '160px';
-          videoElement.style.height = '120px';
+          videoElement.style.width = '320px';
+          videoElement.style.height = '240px';
           videoElement.style.pointerEvents = 'none';
           document.body.appendChild(videoElement);
 
           videoElement.addEventListener('loadeddata', () => {
-            captureCanvas.width  = 160;
-            captureCanvas.height = 120;
+            captureCanvas.width  = 320;
+            captureCanvas.height = 240;
             if (!window.cameraInterval) {
               window.cameraInterval = setInterval(() => {
                 // Skip if a frame is still being processed by server
                 if (_frameInFlight) return;
                 if (document.visibilityState === 'visible' && socket && socket.connected) {
-                  captureCtx.drawImage(videoElement, 0, 0, 160, 120);
-                  const frame = captureCanvas.toDataURL('image/jpeg', 0.35);
+                  captureCtx.drawImage(videoElement, 0, 0, 320, 240);
+                  const frame = captureCanvas.toDataURL('image/jpeg', 0.5);
                   _frameInFlight = true;
                   socket.emit('browser_frame', { frame: frame.split(',')[1] });
-                  // Auto-release lock after 500ms even if no ack received
-                  setTimeout(() => { _frameInFlight = false; }, 500);
+                  // Auto-release lock after 600ms even if no ack received
+                  setTimeout(() => { _frameInFlight = false; }, 600);
                 }
               }, 250); // 4 fps — smooth without overwhelming polling transport
             }

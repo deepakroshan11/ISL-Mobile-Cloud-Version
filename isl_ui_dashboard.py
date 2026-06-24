@@ -33,9 +33,19 @@
 import os
 import time
 import threading
+import logging
 import numpy as np
 import cv2
 import multiprocessing.shared_memory
+
+# ── Silence noisy loggers ────────────────────────────────────────────────────
+# Werkzeug logs every Socket.IO polling request (GET/POST every 250ms).
+# With 4fps polling that's 480+ log lines per minute — silenced to ERROR only.
+logging.getLogger('werkzeug').setLevel(logging.ERROR)
+logging.getLogger('socketio').setLevel(logging.ERROR)
+logging.getLogger('engineio').setLevel(logging.ERROR)
+logging.getLogger('urllib3').setLevel(logging.ERROR)
+# ────────────────────────────────────────────────────────────────────────────
 
 from queue import Queue, Empty
 from flask import Flask, render_template, render_template_string, Response, jsonify, request
@@ -975,4 +985,12 @@ def start_ui_server(shared_state_obj, port: int = 5000):
 
 # ── Stand-alone test ──────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    socketio.run(app, host="0.0.0.0", port=5000, debug=True, use_reloader=False, allow_unsafe_werkzeug=True) 
+    socketio.run(
+        app,
+        host="0.0.0.0",
+        port=5000,
+        debug=False,
+        use_reloader=False,
+        log_output=False,
+        allow_unsafe_werkzeug=True,
+    ) 

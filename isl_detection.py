@@ -36,8 +36,13 @@ from collections import deque, defaultdict, Counter
 from multiprocessing import Manager, Value, shared_memory
 import ctypes
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
-os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
+os.environ["CUDA_VISIBLE_DEVICES"]       = "-1"
+os.environ["TF_CPP_MIN_LOG_LEVEL"]       = "3"
+# Suppress MediaPipe GL context errors (headless cloud — no GPU, uses CPU)
+os.environ["GLOG_minloglevel"]            = "3"   # FATAL only (0=INFO,1=WARN,2=ERROR,3=FATAL)
+os.environ["GLOG_alsologtostderr"]        = "0"
+os.environ["MEDIAPIPE_DISABLE_GPU"]      = "1"
+os.environ["GRPC_VERBOSITY"]             = "ERROR"
 
 from tensorflow.keras.models import load_model
 from gtts import gTTS
@@ -427,30 +432,14 @@ def get_word_suggestions(partial, word_freq):
 
 
 def draw_hand_landmarks(frame, hand_landmarks):
-    mp.solutions.drawing_utils.draw_landmarks(
-        frame, hand_landmarks, mp.solutions.hands.HAND_CONNECTIONS,
-        mp.solutions.drawing_utils.DrawingSpec(
-            color=(0, 255, 0), thickness=2, circle_radius=3),
-        mp.solutions.drawing_utils.DrawingSpec(
-            color=(0, 255, 255), thickness=2),
-    )
+    # PERF: Skeleton drawing disabled in CLOUD mode — it was the main cause
+    # of blurry/poor video quality and unnecessary CPU usage per frame.
+    # The letter and confidence are displayed in the browser sidebar instead.
+    pass
 
 
 def draw_letter_overlay(frame, letter, confidence):
-    if not SHOW_LETTER_OVERLAY or not letter or confidence <= 0:
-        return frame
-    x, y    = OVERLAY_POSITION
-    overlay = frame.copy()
-    cv2.rectangle(overlay, (x - 10, y - 40), (x + 220, y + 20), (0, 0, 0), -1)
-    frame = cv2.addWeighted(overlay, 0.5, frame, 0.5, 0)
-    cv2.putText(frame, letter, (x, y),
-                cv2.FONT_HERSHEY_SIMPLEX, OVERLAY_FONT_SCALE,
-                OVERLAY_COLOR_LETTER, OVERLAY_THICKNESS, cv2.LINE_AA)
-    tw = cv2.getTextSize(letter, cv2.FONT_HERSHEY_SIMPLEX,
-                         OVERLAY_FONT_SCALE, OVERLAY_THICKNESS)[0][0]
-    cv2.putText(frame, f"({confidence:.2f})", (x + tw + 10, y),
-                cv2.FONT_HERSHEY_SIMPLEX, OVERLAY_FONT_SCALE * 0.7,
-                OVERLAY_COLOR_CONF, OVERLAY_THICKNESS - 1, cv2.LINE_AA)
+    # PERF: Text overlay disabled — letter shown in sidebar panel.
     return frame
 
 
@@ -513,6 +502,7 @@ def core_processing_engine(shared_state, shm_name=None, frame_lock_val=None, fra
     letter_confidence_buffer = deque(maxlen=4)
     word_frequency           = Counter()
     current_detected_letter  = ""
+    current_detected_letter_prev = ""
     current_confidence       = 0.0
 
     emotion_history          = deque(maxlen=SMOOTHING_FRAMES)
@@ -701,7 +691,7 @@ def core_processing_engine(shared_state, shm_name=None, frame_lock_val=None, fra
                 no_hand_frames = 0
 
                 for hlm in hand_results.multi_hand_landmarks:
-                    draw_hand_landmarks(frame, hlm)
+                    # draw_hand_landmarks disabled — clean frame sent to browser
                     try:
                         lm_list  = calc_landmark_list(frame, hlm)
                         pre_list = pre_process_landmark(lm_list)
@@ -715,13 +705,18 @@ def core_processing_engine(shared_state, shm_name=None, frame_lock_val=None, fra
                             # Skip number predictions — only A-Z letters
                             if raw_letter.isdigit():
                                 current_detected_letter = ""
+                                current_detected_letter_prev = ""
                                 current_confidence      = 0.0
                                 continue
 
                             current_detected_letter = raw_letter
-                            current_confidence      = prob
+                            current_confidence = prob
 
-                            print(f"DEBUG → {raw_letter} {prob:.4f}")
+                            # Only log when detected letter changes — avoids
+                            # hundreds of identical lines per gesture hold.
+                            if raw_letter != current_detected_letter_prev:
+                                print(f"🔄 Gesture: {raw_letter} ({prob:.3f})")
+                                current_detected_letter_prev = raw_letter
 
                             if prob >= CONF_THRESHOLD:
                                 if raw_letter == candidate_letter:
@@ -765,6 +760,7 @@ def core_processing_engine(shared_state, shm_name=None, frame_lock_val=None, fra
                 candidate_letter        = ""
                 candidate_since         = 0.0
                 current_detected_letter = ""
+                current_detected_letter_prev = ""
                 current_confidence      = 0.0
 
                 if no_hand_frames >= SPACE_THRESHOLD and current_word:
@@ -780,7 +776,7 @@ def core_processing_engine(shared_state, shm_name=None, frame_lock_val=None, fra
                     last_accepted_time   = 0.0
                     no_hand_frames       = 0
 
-            frame = draw_letter_overlay(frame, current_detected_letter, current_confidence)
+            # frame = draw_letter_overlay(...)  # disabled — shown in sidebar UI
 
             # ── Emotion (every N frames) ───────────────────────────────────
             emotion_frame_counter += 1
@@ -843,12 +839,10 @@ def core_processing_engine(shared_state, shm_name=None, frame_lock_val=None, fra
                     frame_seq.value += 1
                 frame_base64 = None
             else:
-                # PERF: Resize to 320×240 before encoding to halve payload size.
-                # 640×480 @ q65 ≈ 40KB; 320×240 @ q70 ≈ 12KB — 3× smaller.
-                # Browser renders it full-width so it still looks fine.
-                display = cv2.resize(frame, (320, 240))
+                # Send full 640×480 frame — browser displays at native resolution.
+                # Skeleton/overlay removed so JPEG compresses cleanly at quality 75.
                 _, buffer_img = cv2.imencode(
-                    ".jpg", display, [cv2.IMWRITE_JPEG_QUALITY, 70])
+                    ".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 75])
                 frame_base64 = base64.b64encode(buffer_img.tobytes()).decode("utf-8")
 
             # ── State packet ───────────────────────────────────────────────
